@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 	"flag"
+	"os"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
