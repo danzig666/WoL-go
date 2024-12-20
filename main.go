@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"flag"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
@@ -76,7 +77,7 @@ func main() {
 	router.GET("/", func(c *gin.Context) {
 		c.Redirect(302, "/web/index.html")
 	})
-	
+
     address := fmt.Sprintf("%s:%s", *host, *port)
     log.Printf("Wake-on-LAN service started on %s", address)
     router.Run(address)
