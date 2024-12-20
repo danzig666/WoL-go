@@ -29,6 +29,14 @@ var webFiles embed.FS
 var defaultMode string
 
 func main() {
+    host := flag.String("h", "0.0.0.0", "Host to bind to")
+    port := flag.String("p", "9543", "Port to bind to")
+    flag.Parse()
+
+    if len(os.Args) == 1 {
+        flag.Usage()
+        return
+    }
 	// init log output to file
 	log.SetOutput(&lumberjack.Logger{
 		Filename:   "./wol.log",
@@ -68,8 +76,10 @@ func main() {
 	router.GET("/", func(c *gin.Context) {
 		c.Redirect(302, "/web/index.html")
 	})
-	log.Printf("Wake-on-LAN service started on :9543")
-	router.Run(":9543")
+	
+    address := fmt.Sprintf("%s:%s", *host, *port)
+    log.Printf("Wake-on-LAN service started on %s", address)
+    router.Run(address)
 }
 
 func initDB() *sql.DB {
