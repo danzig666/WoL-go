@@ -807,6 +807,7 @@ async function refreshAgentBlock(device) {
 
     stateLabel.textContent = (agent.online ? 'Ready' : 'Installed, not reporting in') +
         (agent.hostname ? ' · ' + agent.hostname : '') +
+        (agent.version ? ' · agent ' + agent.version : '') +
         (warnings.length ? ' · ' + warnings.join(', ') : '');
     $('agentSetupButton').textContent = 'Pair again';
     $('agentRemoveButton').style.display = '';

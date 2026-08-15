@@ -21,6 +21,14 @@ func uninstallService() error {
 	return fmt.Errorf("the sleep agent is only supported on Windows")
 }
 
+func stopService() error {
+	return fmt.Errorf("the sleep agent is only supported on Windows")
+}
+
+func startService() error {
+	return fmt.Errorf("the sleep agent is only supported on Windows")
+}
+
 func serviceStopChannel() <-chan struct{} {
 	return make(chan struct{})
 }

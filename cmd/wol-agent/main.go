@@ -13,6 +13,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -28,7 +29,7 @@ import (
 	"time"
 )
 
-const version = "1.1.0"
+const version = "1.1.1"
 
 // heartbeatEvery is how often the agent reports in. It also decides how
 // quickly the panel notices a machine has gone.
@@ -110,6 +111,25 @@ func main() {
 		runUninstall(os.Args[2:])
 	case "run":
 		runAgent(os.Args[2:])
+	case "stop":
+		// Stop before replacing the executable: Windows locks a running one.
+		if err := stopService(); err != nil {
+			log.Fatalf("could not stop the service: %v", err)
+		}
+		log.Printf("Stopped. The executable can now be replaced.")
+	case "start":
+		if err := startService(); err != nil {
+			log.Fatalf("could not start the service: %v", err)
+		}
+		log.Printf("Started.")
+	case "restart":
+		if err := stopService(); err != nil {
+			log.Printf("could not stop: %v", err)
+		}
+		if err := startService(); err != nil {
+			log.Fatalf("could not start the service: %v", err)
+		}
+		log.Printf("Restarted, running %s.", version)
 	case "sleep":
 		// Handy for checking the machine will actually suspend before
 		// involving the server at all.
@@ -139,6 +159,10 @@ func usage() {
 
   wol-agent uninstall
         Remove the service and forget the token.
+
+  wol-agent stop | start | restart
+        Control the service. To update the agent: stop, replace the .exe,
+        start. The pairing is kept, so no new code is needed.
 
   wol-agent run
         Run in the foreground (what the service does).
@@ -291,6 +315,17 @@ func runAgent(args []string) {
 func serve(cfg config) {
 	stop := serviceStopChannel()
 
+	// The poll is held open for the best part of a minute. Without cancelling
+	// the request in flight, stopping the service would wait for that to
+	// finish - long enough for Windows to call it a failed stop, and exactly
+	// when a person is trying to replace the executable.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-stop
+		cancel()
+	}()
+
 	go func() {
 		// The first heartbeat goes out immediately so the panel lights up.
 		for {
@@ -317,8 +352,13 @@ func serve(cfg config) {
 		default:
 		}
 
-		command, err := pollOnce(client, cfg)
+		command, err := pollOnce(ctx, client, cfg)
 		if err != nil {
+			// A cancelled request means we are shutting down, not a fault.
+			if ctx.Err() != nil {
+				log.Printf("stopping")
+				return
+			}
 			// A machine that just woke, or a server being restarted, both look
 			// like this. Wait a little rather than hammering.
 			log.Printf("poll: %v", err)
@@ -341,8 +381,8 @@ func serve(cfg config) {
 
 const longPollClientTimeout = 75 * time.Second
 
-func pollOnce(client *http.Client, cfg config) (string, error) {
-	req, err := http.NewRequest(http.MethodGet, cfg.Server+"/api/agent/commands", nil)
+func pollOnce(ctx context.Context, client *http.Client, cfg config) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.Server+"/api/agent/commands", nil)
 	if err != nil {
 		return "", err
 	}

@@ -127,6 +127,26 @@ Other commands: `wol-agent status` prints what the machine reports about
 itself, `wol-agent sleep` suspends it there and then without involving the
 server, and `wol-agent uninstall` removes the service and forgets the token.
 
+### Updating the agent
+
+The service locks the executable while it runs, so replace it in three steps,
+from an **administrator** Command Prompt in the folder holding the agent:
+
+```
+wol-agent.exe stop
+copy /y ...\wol-agent.exe wol-agent.exe
+wol-agent.exe start
+```
+
+The pairing lives in `wol-agent.json` beside the executable and is not touched,
+so no new code is needed. `wol-agent.exe restart` does the last two steps if
+the file is already in place, and the panel shows each agent's version so you
+can see which machines are still behind.
+
+On an agent older than 1.1.1 use `sc stop WoLGoAgent` and `sc start WoLGoAgent`
+instead, and expect the stop to take up to a minute: those builds only noticed
+the request between polls.
+
 ### Use the local address
 
 Point the agent at the server **on your own network** — `http://192.168.1.10:9543`,

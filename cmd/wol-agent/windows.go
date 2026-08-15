@@ -202,6 +202,62 @@ func installService() error {
 	return nil
 }
 
+// stopService stops the service and waits for it to actually be stopped,
+// because the executable stays locked until it is.
+func stopService() error {
+	manager, err := mgr.Connect()
+	if err != nil {
+		return fmt.Errorf("%w (run this from an elevated prompt)", err)
+	}
+	defer manager.Disconnect()
+
+	service, err := manager.OpenService(serviceName)
+	if err != nil {
+		return fmt.Errorf("the service is not installed")
+	}
+	defer service.Close()
+
+	status, err := service.Query()
+	if err == nil && status.State == svc.Stopped {
+		return nil
+	}
+	if _, err := service.Control(svc.Stop); err != nil {
+		return err
+	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		status, err := service.Query()
+		if err != nil {
+			return err
+		}
+		if status.State == svc.Stopped {
+			return nil
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return fmt.Errorf("it did not stop within 30 seconds")
+}
+
+func startService() error {
+	manager, err := mgr.Connect()
+	if err != nil {
+		return fmt.Errorf("%w (run this from an elevated prompt)", err)
+	}
+	defer manager.Disconnect()
+
+	service, err := manager.OpenService(serviceName)
+	if err != nil {
+		return fmt.Errorf("the service is not installed")
+	}
+	defer service.Close()
+
+	if status, err := service.Query(); err == nil && status.State == svc.Running {
+		return nil
+	}
+	return service.Start()
+}
+
 func uninstallService() error {
 	manager, err := mgr.Connect()
 	if err != nil {
