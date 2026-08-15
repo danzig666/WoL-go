@@ -127,6 +127,25 @@ Other commands: `wol-agent status` prints what the machine reports about
 itself, `wol-agent sleep` suspends it there and then without involving the
 server, and `wol-agent uninstall` removes the service and forgets the token.
 
+### Use the local address
+
+Point the agent at the server **on your own network** — `http://192.168.1.10:9543`,
+not the public hostname. A hostname behind Cloudflare Access answers an
+unauthenticated request with a sign-in page, and an agent cannot sign in
+through a browser.
+
+If an agent genuinely has to reach the server through Access, create a
+**service token** in Zero Trust (Access → Service Auth), add it to the
+application's policy, and give it to the agent:
+
+```
+wol-agent.exe install --server https://wol.example.com --code XXXX-XXXX ^
+  --cf-client-id XXXX.access --cf-client-secret YYYY
+```
+
+The agent then sends `CF-Access-Client-Id` and `CF-Access-Client-Secret` on
+every request, which is how Access authenticates a machine.
+
 **On purpose, the agent understands three things: sleep, sleep by force, and
 report on itself.** There is no command that runs a program, so a stolen agent
 token cannot become a shell on that machine — it can only make one computer
