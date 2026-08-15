@@ -821,14 +821,77 @@ $('agentSetupButton').addEventListener('click', async (event) => {
     setLoading(button, true);
     try {
         const enrolment = await api(`/api/devices/${state.editingId}/enrol`, { method: 'POST' });
+
+        // The address comes from the server, which knows where it is listening.
+        // Using this page's own address would hand out the public hostname
+        // whenever the administrator is working through Cloudflare — the one
+        // address an agent cannot use.
+        const addresses = enrolment.server_urls || [];
+        const server = addresses[0] || location.origin;
+
         $('agentCommand').textContent =
-            `wol-agent.exe install --server ${location.origin} --code ${enrolment.code}`;
+            `wol-agent.exe install --server ${server} --code ${enrolment.code}`;
+
+        const alternatives = addresses.slice(1);
+        $('agentAltAddresses').textContent = alternatives.length
+            ? 'This machine is also reachable at ' + alternatives.join(', ') +
+              ' — use whichever that computer can see.'
+            : '';
+
         $('agentSteps').classList.add('visible');
     } catch (err) {
         showError('deviceError', err.message);
     } finally {
         setLoading(button, false);
     }
+});
+
+// copyText puts text on the clipboard.
+//
+// navigator.clipboard exists only in a secure context, and this page is
+// normally reached over plain HTTP on a local address — so the modern call is
+// tried first and a hidden textarea carries the rest.
+async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch (err) {
+            // fall through to the older method
+        }
+    }
+
+    const holder = document.createElement('textarea');
+    holder.value = text;
+    holder.setAttribute('readonly', '');
+    holder.style.position = 'fixed';
+    holder.style.top = '-1000px';
+    document.body.appendChild(holder);
+    holder.select();
+    let copied = false;
+    try {
+        copied = document.execCommand('copy');
+    } catch (err) {
+        copied = false;
+    }
+    holder.remove();
+    return copied;
+}
+
+$('agentCopyButton').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const copied = await copyText($('agentCommand').textContent);
+    const original = button.textContent;
+    button.textContent = copied ? 'Copied' : 'Press Ctrl+C';
+    if (!copied) {
+        // Leave it selected so the keyboard shortcut works.
+        const range = document.createRange();
+        range.selectNodeContents($('agentCommand'));
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+    }
+    setTimeout(() => { button.textContent = original; }, 1800);
 });
 
 $('agentRemoveButton').addEventListener('click', async () => {

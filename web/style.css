@@ -1146,6 +1146,24 @@ body.reordering .device-card:not(.dragging):hover {
     display: block;
 }
 
+.agent-command-row {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.agent-command-row .agent-command {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+}
+
+.btn-copy {
+    flex: none;
+    align-self: stretch;
+}
+
 .agent-command {
     margin: 8px 0;
     padding: 10px 12px;

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -158,6 +159,46 @@ func normalizeCode(value string) string {
 
 // --- Administration ---
 
+// suggestedServerURLs lists the addresses an agent should be pointed at:
+// this machine on the local network, never the public hostname.
+//
+// A hostname behind Cloudflare Access answers an agent with a sign-in page,
+// and an agent cannot sign in. Taking the address from the browser would hand
+// out exactly that hostname whenever the administrator happens to be working
+// remotely, which is the one address guaranteed not to work.
+func suggestedServerURLs() []string {
+	port := listenPort
+	if port == "" {
+		port = "9543"
+	}
+
+	var urls []string
+	seen := map[string]bool{}
+	add := func(ip string) {
+		if ip == "" || seen[ip] {
+			return
+		}
+		seen[ip] = true
+		urls = append(urls, "http://"+net.JoinHostPort(ip, port))
+	}
+
+	// Bound to one address: that is the only one that will answer.
+	if listenHost != "" && listenHost != "0.0.0.0" && listenHost != "::" {
+		add(listenHost)
+		return urls
+	}
+
+	// The address this machine uses to reach the outside world is the one on
+	// the real network, rather than a hypervisor's.
+	add(outboundIP())
+	for _, network := range localNetworks() {
+		if address, ok := network["address"].(string); ok {
+			add(address)
+		}
+	}
+	return urls
+}
+
 // createEnrolment issues a pairing code for one device.
 func createEnrolment(c *gin.Context) {
 	deviceID, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -190,9 +231,10 @@ func createEnrolment(c *gin.Context) {
 
 	log.Printf("Issued an agent code for %q", device.Name)
 	c.JSON(http.StatusCreated, gin.H{
-		"code":       code,
-		"expires_in": int(enrolmentValidFor.Seconds()),
-		"device":     device.Name,
+		"code":        code,
+		"expires_in":  int(enrolmentValidFor.Seconds()),
+		"device":      device.Name,
+		"server_urls": suggestedServerURLs(),
 	})
 }
 

@@ -218,8 +218,14 @@
                         <p class="hint">On <strong id="agentTargetName">that computer</strong>, download
                         <code>wol-agent.exe</code> from the releases page, open a
                         <strong>Command Prompt as administrator</strong> in the same folder, and run:</p>
-                        <pre class="agent-command" id="agentCommand"></pre>
-                        <p class="hint">The code is valid for 15 minutes and can be used once.</p>
+                        <div class="agent-command-row">
+                            <pre class="agent-command" id="agentCommand"></pre>
+                            <button type="button" class="btn btn-secondary btn-copy" id="agentCopyButton">Copy</button>
+                        </div>
+                        <p class="hint" id="agentAltAddresses"></p>
+                        <p class="hint">The code is valid for 15 minutes and can be used once.
+                        Use this address, not the one you reach this page on from outside —
+                        an agent cannot sign in through Cloudflare Access.</p>
                     </div>
                 </div>
 

@@ -43,6 +43,12 @@ var firstRunPassword string
 // line, in which case the web interface leaves it alone.
 var cfTrustFromFlag bool
 
+// listenHost and listenPort are kept so the service can tell an agent where to
+// find it. The browser's own address is no use for that: an administrator
+// working through the Cloudflare hostname would be shown the one address an
+// agent cannot use.
+var listenHost, listenPort string
+
 func main() {
 	host := flag.String("h", "0.0.0.0", "Host to bind to")
 	port := flag.String("p", "9543", "Port to bind to")
@@ -51,6 +57,8 @@ func main() {
 	flag.BoolVar(&noTray, "no-tray", false, "Do not show the notification-area (system tray) icon on Windows")
 	cfTrust := flag.String("cf-trust", "", "Source addresses whose Cloudflare Access headers are trusted, e.g. \"localhost\" or \"127.0.0.1,192.168.0.50\". Empty disables Cloudflare identities.")
 	flag.Parse()
+
+	listenHost, listenPort = *host, *port
 
 	if strings.TrimSpace(*cfTrust) != "" {
 		if err := applyCFTrust(*cfTrust); err != nil {
