@@ -94,6 +94,46 @@ Wake-on-LAN needs a few things set on the target machine, once:
 
 The **?** button in the app explains the same thing in more detail.
 
+## Putting computers to sleep
+
+Waking a machine needs nothing installed on it. **Sleeping** one does, because
+no operating system lets a stranger on the network suspend it — so there is a
+small companion program, `wol-agent.exe`, for the computers you want to send to
+sleep.
+
+Set it up from the panel: edit a computer, press **Set up** under "Put this
+computer to sleep", and it shows a command with a one-time pairing code. On
+that computer, in an administrator Command Prompt:
+
+```
+wol-agent.exe install --server http://your-server:9543 --code XXXX-XXXX
+```
+
+That pairs it, installs a Windows service and starts it. A **Sleep** button
+then appears on that computer's card.
+
+- The agent makes **outbound requests only** — no open port, no firewall rule.
+- It holds a long poll open, so Sleep takes effect immediately rather than at
+  the next poll.
+- It runs as a service under LOCAL SYSTEM, so it works at the lock screen and
+  when nobody is signed in.
+- On pairing it reports the machine's **real MAC address** and corrects the
+  saved one, which is the usual reason a computer never wakes.
+- It also reports whether anything is **allowed to wake** that machine and
+  whether **fast startup** is on, and the panel shows both — so you find out
+  before you need it, rather than after.
+
+Other commands: `wol-agent status` prints what the machine reports about
+itself, `wol-agent sleep` suspends it there and then without involving the
+server, and `wol-agent uninstall` removes the service and forgets the token.
+
+**On purpose, the agent understands three things: sleep, sleep by force, and
+report on itself.** There is no command that runs a program, so a stolen agent
+token cannot become a shell on that machine — it can only make one computer
+sleep. Tokens are per-machine, stored hashed on the server, and revocable from
+the same dialog. A sleep command that a machine misses expires after ninety
+seconds, so waking a computer never makes it drop straight back to sleep.
+
 ## Who can see what
 
 | | Sees |

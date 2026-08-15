@@ -150,6 +150,12 @@ func main() {
 		api.POST("/scan", beginScan)
 		api.GET("/scan", scanStatus)
 
+		// Sleep agents.
+		api.GET("/agents", listAgents)
+		api.POST("/devices/:id/enrol", createEnrolment)
+		api.POST("/devices/:id/sleep", sleepDevice)
+		api.DELETE("/agents/:id", deleteAgent)
+
 		// History and statistics: strictly the administrator's view.
 		api.GET("/history", historyOverview)
 		api.GET("/history/:id/heatmap", deviceHeatmap)
@@ -165,6 +171,20 @@ func main() {
 		api.PUT("/users/:id/devices", setCFUserDevices)
 		api.DELETE("/users/:id", deleteCFUser)
 	}
+
+	// The agent's own endpoints. Enrolment is open because the pairing code is
+	// the credential; everything else needs the token that code buys.
+	router.POST("/api/agent/enrol", enrolAgent)
+	agent := router.Group("/api/agent", authorizeAgent())
+	{
+		agent.POST("/heartbeat", agentHeartbeat)
+		agent.GET("/commands", agentCommands)
+		agent.POST("/result", agentResult)
+	}
+
+	// Sleeping is offered to the same visitors who may wake, since it is the
+	// counterpart of the same button.
+	anon.POST("/devices/:id/sleep", wakeRateLimit(), sleepDevice)
 
 	// Who am I: used by the page to show the signed-in address and to decide
 	// which controls to offer.
@@ -411,6 +431,37 @@ func createTables(db *sql.DB) {
             ended_at INTEGER NOT NULL
         );`,
 		`CREATE INDEX IF NOT EXISTS idx_history_device ON device_history (device_id, ended_at);`,
+		// The companion program installed on a computer, which can put it to
+		// sleep. One per device; only the hash of its token is kept.
+		`CREATE TABLE IF NOT EXISTS agents (
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            device_id INTEGER NOT NULL UNIQUE REFERENCES devices(id) ON DELETE CASCADE,
+            token_hash TEXT NOT NULL UNIQUE,
+            hostname TEXT,
+            version TEXT,
+            wake_armed INTEGER,
+            fast_startup INTEGER,
+            power_requests TEXT,
+            last_seen INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL DEFAULT 0
+        );`,
+		// Short-lived pairing codes, stored hashed like any other credential.
+		`CREATE TABLE IF NOT EXISTS agent_enrolments (
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            code_hash TEXT NOT NULL,
+            device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            used_at INTEGER NOT NULL DEFAULT 0
+        );`,
+		// Commands waiting to be collected. Rows are discarded once stale, so
+		// a machine that slept through one does not act on it when it wakes.
+		`CREATE TABLE IF NOT EXISTS agent_commands (
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+            command TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        );`,
 		// Who woke which machine, and when.
 		`CREATE TABLE IF NOT EXISTS wake_events (
             id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,

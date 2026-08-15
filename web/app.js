@@ -390,6 +390,9 @@ function deviceCard(device) {
             <button type="button" class="btn btn-primary btn-wake" data-action="wake">
                 <svg class="icon"><use href="#i-bolt"/></svg><span>Wake up</span>
             </button>
+            <button type="button" class="btn btn-secondary btn-sleep" data-action="sleep" title="Put this computer to sleep">
+                <svg class="icon"><use href="#i-moon"/></svg><span>Sleep</span>
+            </button>
             <button type="button" class="btn btn-ghost btn-icon manage-only" data-action="edit" title="Edit" aria-label="Edit">
                 <svg class="icon"><use href="#i-pencil"/></svg>
             </button>
@@ -421,6 +424,16 @@ function deviceCard(device) {
         notes.textContent = device.notes;
     } else {
         notes.remove();
+    }
+
+    // Sleeping needs the companion agent, so the button only appears where one
+    // is installed, and is disabled while that machine is not reporting in.
+    const sleepButton = card.querySelector('[data-action="sleep"]');
+    if (!device.can_sleep) {
+        sleepButton.remove();
+    } else if (!device.agent_online) {
+        sleepButton.disabled = true;
+        sleepButton.title = 'That computer is not reporting in at the moment';
     }
 
     applyStatus(card, device);
@@ -541,6 +554,8 @@ $('deviceGrid').addEventListener('click', async (event) => {
 
     if (button.dataset.action === 'wake') {
         await wakeDevice(device, button);
+    } else if (button.dataset.action === 'sleep') {
+        await sleepDevice(device, button);
     } else if (button.dataset.action === 'edit') {
         openDeviceModal(device);
     } else if (button.dataset.action === 'delete') {
@@ -565,6 +580,35 @@ async function wakeDevice(device, button) {
         toast(`Wake-up signal sent to ${device.name}`, 'success');
         device.last_woken = Math.floor(Date.now() / 1000);
         // A machine takes a little while to boot, so look again shortly.
+        scheduleWakeChecks();
+    } catch (err) {
+        toast(err.message, 'error');
+    } finally {
+        setLoading(button, false);
+    }
+}
+
+async function sleepDevice(device, button) {
+    const ok = await confirmDialog(
+        `Put ${device.name} to sleep now?`, 'Sleep');
+    if (!ok) {
+        return;
+    }
+
+    setLoading(button, true);
+    try {
+        const result = await api(endpoint(`/devices/${device.id}/sleep`), {
+            method: 'POST',
+            body: { force: false },
+        });
+        if (result.agent_waiting) {
+            toast(`${device.name} is going to sleep`, 'success');
+        } else {
+            // Queued instead of delivered: the agent will collect it within a
+            // minute, or the command expires.
+            toast(`Sleep sent to ${device.name}`, 'success');
+        }
+        // Watch it drop off, the mirror of the checks after a wake.
         scheduleWakeChecks();
     } catch (err) {
         toast(err.message, 'error');
@@ -722,6 +766,90 @@ async function saveOrder() {
 
 /* ---------------- Add / edit ---------------- */
 
+// --- Sleep agent setup, inside the edit dialog ---
+
+async function refreshAgentBlock(device) {
+    const block = $('agentBlock');
+    // Only meaningful for a saved device, since pairing needs its id.
+    block.classList.toggle('visible', !!device);
+    $('agentSteps').classList.remove('visible');
+    if (!device) {
+        return;
+    }
+
+    $('agentTargetName').textContent = device.name;
+
+    let agents = [];
+    try {
+        agents = await api('/api/agents');
+    } catch (err) {
+        agents = [];
+    }
+    const agent = agents.find((a) => a.device_id === device.id);
+    state.editingAgent = agent || null;
+
+    const stateLabel = $('agentState');
+    stateLabel.classList.toggle('on', !!(agent && agent.online));
+    if (!agent) {
+        stateLabel.textContent = 'Not set up';
+        $('agentSetupButton').textContent = 'Set up';
+        $('agentRemoveButton').style.display = 'none';
+        return;
+    }
+
+    const warnings = [];
+    if (agent.wake_armed === false) {
+        warnings.push('nothing is allowed to wake it');
+    }
+    if (agent.fast_startup === true) {
+        warnings.push('fast startup is on');
+    }
+
+    stateLabel.textContent = (agent.online ? 'Ready' : 'Installed, not reporting in') +
+        (agent.hostname ? ' · ' + agent.hostname : '') +
+        (warnings.length ? ' · ' + warnings.join(', ') : '');
+    $('agentSetupButton').textContent = 'Pair again';
+    $('agentRemoveButton').style.display = '';
+}
+
+$('agentSetupButton').addEventListener('click', async (event) => {
+    if (!state.editingId) {
+        return;
+    }
+    const button = event.currentTarget;
+    setLoading(button, true);
+    try {
+        const enrolment = await api(`/api/devices/${state.editingId}/enrol`, { method: 'POST' });
+        $('agentCommand').textContent =
+            `wol-agent.exe install --server ${location.origin} --code ${enrolment.code}`;
+        $('agentSteps').classList.add('visible');
+    } catch (err) {
+        showError('deviceError', err.message);
+    } finally {
+        setLoading(button, false);
+    }
+});
+
+$('agentRemoveButton').addEventListener('click', async () => {
+    if (!state.editingAgent) {
+        return;
+    }
+    const ok = await confirmDialog(
+        'Remove the sleep agent for this computer? It will stop being able to sleep it.', 'Remove');
+    if (!ok) {
+        return;
+    }
+    try {
+        await api('/api/agents/' + state.editingAgent.id, { method: 'DELETE' });
+        toast('Agent removed', 'success');
+        const device = state.devices.find((d) => d.id === state.editingId);
+        await refreshAgentBlock(device);
+        loadDevices();
+    } catch (err) {
+        showError('deviceError', err.message);
+    }
+});
+
 function openDeviceModal(device) {
     state.editingId = device ? device.id : null;
     $('deviceModalTitle').textContent = device ? 'Edit computer' : 'Add a computer';
@@ -734,6 +862,7 @@ function openDeviceModal(device) {
     $('devicePort').value = device && device.port ? device.port : '';
     hideError('deviceError');
     openModal('deviceModal');
+    refreshAgentBlock(device);
     setTimeout(() => $('deviceName').focus(), 50);
 }
 

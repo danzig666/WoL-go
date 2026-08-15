@@ -37,6 +37,10 @@ type Device struct {
 	Hostname string `json:"hostname"`
 	// LastSeen is when the machine last answered a probe.
 	LastSeen int64 `json:"last_seen"`
+	// CanSleep reports whether a sleep agent is installed and reporting in,
+	// which is what decides if the interface offers a Sleep button.
+	CanSleep    bool `json:"can_sleep"`
+	AgentOnline bool `json:"agent_online"`
 }
 
 const deviceColumns = "id, name, mac, COALESCE(ip, ''), COALESCE(notes, ''), COALESCE(broadcast, ''), " +
@@ -59,17 +63,40 @@ func loadDevices() ([]Device, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	devices := []Device{}
 	for rows.Next() {
 		d, err := scanDevice(rows)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		devices = append(devices, d)
 	}
-	return devices, rows.Err()
+	err = rows.Err()
+	// Closed before the next query: the pool holds a single connection, so a
+	// cursor left open here would deadlock against it.
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	return withAgentState(devices), nil
+}
+
+// withAgentState marks the computers that have a sleep agent.
+func withAgentState(devices []Device) []Device {
+	if len(devices) == 0 {
+		return devices
+	}
+	agents := agentsByDevice()
+	for i := range devices {
+		if agent, ok := agents[devices[i].ID]; ok {
+			devices[i].CanSleep = true
+			devices[i].AgentOnline = agent.Online
+		}
+	}
+	return devices
 }
 
 func deviceByID(id int64) (Device, error) {

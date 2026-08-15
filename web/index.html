@@ -27,6 +27,7 @@
         <symbol id="i-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.2 2.4c-.6.2-.7.7-.7 1.3"/><path d="M12 17h.01"/></symbol>
         <symbol id="i-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
         <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></symbol>
+        <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></symbol>
         <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-9M22 20H2"/></symbol>
         <symbol id="i-grip" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></symbol>
         <symbol id="i-people" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 5.3a3.2 3.2 0 0 1 0 5.4M17.5 14.2A5.5 5.5 0 0 1 20.5 19"/></symbol>
@@ -205,9 +206,27 @@
                     </div>
                 </details>
 
+                <div class="agent-block" id="agentBlock">
+                    <div class="agent-head">
+                        <div>
+                            <strong>Put this computer to sleep</strong>
+                            <span class="agent-state" id="agentState">Not set up</span>
+                        </div>
+                        <button type="button" class="btn btn-secondary" id="agentSetupButton">Set up</button>
+                    </div>
+                    <div class="agent-steps" id="agentSteps">
+                        <p class="hint">On <strong id="agentTargetName">that computer</strong>, download
+                        <code>wol-agent.exe</code> from the releases page, open a
+                        <strong>Command Prompt as administrator</strong> in the same folder, and run:</p>
+                        <pre class="agent-command" id="agentCommand"></pre>
+                        <p class="hint">The code is valid for 15 minutes and can be used once.</p>
+                    </div>
+                </div>
+
                 <p class="form-error" id="deviceError" role="alert"></p>
             </div>
             <div class="modal-foot">
+                <button type="button" class="btn btn-ghost btn-danger-text" id="agentRemoveButton">Remove agent</button>
                 <button type="button" class="btn btn-ghost modal-close">Cancel</button>
                 <button type="submit" class="btn btn-primary" id="deviceSaveButton">Save</button>
             </div>

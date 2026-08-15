@@ -53,6 +53,20 @@ jobs:
           build windows 386   -tray.exe "-H windowsgui"
           build windows arm64 -tray.exe "-H windowsgui"
 
+          # The sleep agent, which runs on the computers being woken. Windows
+          # only: suspending a machine and the service model are both platform
+          # specific, and the package only has stubs elsewhere.
+          agent() {
+            echo "building agent windows/$1"
+            GOOS=windows GOARCH="$1" CGO_ENABLED=0 go build \
+              -trimpath \
+              -ldflags "-s -w" \
+              -o "dist/wol-agent-windows-$1.exe" ./cmd/wol-agent
+          }
+          agent amd64
+          agent 386
+          agent arm64
+
           ls -l dist
 
       - name: Checksums

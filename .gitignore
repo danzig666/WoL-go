@@ -7,8 +7,16 @@ WoL-go-*.exe
 WoL-go-linux-*
 WoL-go-darwin-*
 WoL-go-windows-*
+wol-agent
+wol-agent.exe
+wol-agent-*
 *.exe~
 build-test-*
+
+# The agent's saved pairing token.
+wol-agent.json
+agent-out.log
+agent-err.log
 
 # Runtime data, created next to the executable when the service runs.
 # The database holds the password hash, the signing key and the device list.

@@ -125,11 +125,18 @@ func devicesForUser(userID int64) ([]Device, error) {
 	for rows.Next() {
 		d, err := scanDevice(rows)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		devices = append(devices, d)
 	}
-	return devices, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	return withAgentState(devices), nil
 }
 
 // visibleDevices is the list the caller is allowed to know about.
