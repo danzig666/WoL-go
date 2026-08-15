@@ -1,30 +1,32 @@
 # Compiled binaries. These are build output, not source: the release workflow
 # produces them, and they are tens of megabytes each.
-WoL-go
-WoL-go.exe
-WoL-go-tray.exe
-WoL-go-*.exe
-WoL-go-linux-*
-WoL-go-darwin-*
-WoL-go-windows-*
-wol-agent
-wol-agent.exe
-wol-agent-*
-*.exe~
-build-test-*
-
-# The agent's saved pairing token.
-wol-agent.json
-agent-out.log
-agent-err.log
+#
+# Every pattern here is anchored with a leading slash so it matches only the
+# repository root. Without that, "wol-agent" also matched the cmd/wol-agent
+# source directory and quietly kept the agent out of the repository.
+/WoL-go
+/WoL-go.exe
+/WoL-go-tray.exe
+/WoL-go-*
+/wol-agent
+/wol-agent.exe
+/wol-agent-*
+/dist/
+/*.exe~
+/build-test-*
 
 # Runtime data, created next to the executable when the service runs.
 # The database holds the password hash, the signing key and the device list.
-wol.db
-wol.db-wal
-wol.db-shm
-wol.log
-wol.log.*
+/wol.db
+/wol.db-wal
+/wol.db-shm
+/wol.log
+/wol.log.*
+
+# The agent's saved pairing token.
+/wol-agent.json
+/agent-out.log
+/agent-err.log
 
 # Editor and OS noise
 .vscode/
