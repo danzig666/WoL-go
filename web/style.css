@@ -1,4 +1,4 @@
-﻿/* web/style.css - dark theme, mobile first */
+/* web/style.css - dark theme, mobile first */
 
 :root {
     --bg: #0e1116;
@@ -1082,12 +1082,12 @@ body.reordering .device-card:not(.dragging):hover {
 }
 
 .advanced summary::before {
-    content: "â–¸ ";
+    content: "\25B8\00A0";
     color: var(--text-faint);
 }
 
 .advanced[open] summary::before {
-    content: "â–ľ ";
+    content: "\25BE\00A0";
 }
 
 .advanced-body {

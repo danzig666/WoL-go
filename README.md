@@ -15,6 +15,8 @@ A fork of [celyrin/WoL-go](https://github.com/celyrin/WoL-go), substantially
 rewritten: pure-Go SQLite, a new interface, network discovery, per-user access,
 state history, and a rebuilt authentication layer.
 
+![The control panel](docs/screenshots/panel.png)
+
 ## Features
 
 - **Find computers** — scans your LAN and lists every machine with its IP, MAC,
@@ -29,6 +31,35 @@ state history, and a rebuilt authentication layer.
   computers shared with their email address.
 - **Windows tray app** — no console window, optional start with Windows.
 - Dark, responsive interface; drag to reorder; works on a phone.
+
+## Screenshots
+
+*(fictitious computers and addresses)*
+
+**Find computers** — scans the LAN and shows what is there, ready to tick and add.
+Machines already on your list are marked.
+
+![Network discovery](docs/screenshots/discover.png)
+
+**History & statistics**, for the administrator only — a timeline per machine
+over 24 hours, 7 days, 30 days or a year.
+
+![History and statistics](docs/screenshots/history.png)
+
+Below it, the usage pattern of the selected machine over 90 days, and who woke
+what.
+
+![Usage pattern and wake log](docs/screenshots/heatmap.png)
+
+**Remote access** — tick which computers each Cloudflare Access email may see
+and wake.
+
+![Per-person access](docs/screenshots/people.png)
+
+**On a phone** — here as a Cloudflare visitor, who sees only what has been
+shared with them, and no MAC or IP addresses.
+
+<img src="docs/screenshots/mobile.png" alt="Phone view" width="330">
 
 ## Getting started
 
