@@ -1,4 +1,4 @@
-name: Build and Release
+﻿name: Build and Release
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: '1.18'
+          go-version: 'stable'
 
       - name: Check out code
         uses: actions/checkout@v2
@@ -24,7 +24,7 @@ jobs:
           export GOOS=linux
           export GOARCH=amd64
           go mod tidy
-          go build -o WoL-go-linux-amd64 -ldflags "-X main.defaultMode=release -extldflags '-static'" main.go
+          go build -o WoL-go-linux-amd64 -ldflags "-X main.defaultMode=release -s -w" .
 
       # Build binary for linux/386
       - name: Build binary for Linux 386
@@ -32,7 +32,7 @@ jobs:
           export GOOS=linux
           export GOARCH=386
           go mod tidy
-          go build -o WoL-go-linux-386 -ldflags "-X main.defaultMode=release -extldflags '-static'" main.go
+          go build -o WoL-go-linux-386 -ldflags "-X main.defaultMode=release -s -w" .
 
       # Build binary for linux/arm
       - name: Build binary for Linux ARM
@@ -40,7 +40,7 @@ jobs:
           export GOOS=linux
           export GOARCH=arm
           go mod tidy
-          go build -o WoL-go-linux-arm -ldflags "-X main.defaultMode=release -extldflags '-static'" main.go
+          go build -o WoL-go-linux-arm -ldflags "-X main.defaultMode=release -s -w" .
 
       # Build binary for linux/arm64
       - name: Build binary for Linux ARM64
@@ -48,7 +48,7 @@ jobs:
           export GOOS=linux
           export GOARCH=arm64
           go mod tidy
-          go build -o WoL-go-linux-arm64 -ldflags "-X main.defaultMode=release -extldflags '-static'" main.go
+          go build -o WoL-go-linux-arm64 -ldflags "-X main.defaultMode=release -s -w" .
 
       # Build binary for windows/amd64
       - name: Build binary for Windows AMD64
@@ -56,7 +56,7 @@ jobs:
           export GOOS=windows
           export GOARCH=amd64
           go mod tidy
-          go build -o WoL-go-windows-amd64.exe -ldflags "-X main.defaultMode=release -extldflags '-static'" main.go
+          go build -o WoL-go-windows-amd64.exe -ldflags "-X main.defaultMode=release -s -w" .
 
       # Build binary for windows/386
       - name: Build binary for Windows 386
@@ -64,7 +64,21 @@ jobs:
           export GOOS=windows
           export GOARCH=386
           go mod tidy
-          go build -o WoL-go-windows-386.exe -ldflags "-X main.defaultMode=release -extldflags '-static'" main.go
+          go build -o WoL-go-windows-386.exe -ldflags "-X main.defaultMode=release -s -w" .
+
+      # Windows tray builds: same program, linked for the GUI subsystem so no
+      # console window appears. These are the ones most Windows users want.
+      - name: Build tray binary for Windows AMD64
+        run: |
+          export GOOS=windows
+          export GOARCH=amd64
+          go build -o WoL-go-windows-amd64-tray.exe -ldflags "-H windowsgui -X main.defaultMode=release -s -w" .
+
+      - name: Build tray binary for Windows 386
+        run: |
+          export GOOS=windows
+          export GOARCH=386
+          go build -o WoL-go-windows-386-tray.exe -ldflags "-H windowsgui -X main.defaultMode=release -s -w" .
 
       # Build binary for darwin/amd64
       - name: Build binary for Darwin AMD64
@@ -72,7 +86,7 @@ jobs:
           export GOOS=darwin
           export GOARCH=amd64
           go mod tidy
-          go build -o WoL-go-darwin-amd64 -ldflags "-X main.defaultMode=release -extldflags '-static'" main.go
+          go build -o WoL-go-darwin-amd64 -ldflags "-X main.defaultMode=release -s -w" .
 
       # Build binary for darwin/arm64
       - name: Build binary for Darwin ARM64
@@ -80,7 +94,7 @@ jobs:
           export GOOS=darwin
           export GOARCH=arm64
           go mod tidy
-          go build -o WoL-go-darwin-arm64 -ldflags "-X main.defaultMode=release -extldflags '-static'" main.go
+          go build -o WoL-go-darwin-arm64 -ldflags "-X main.defaultMode=release -s -w" .
 
       - name: Create Release
         id: create_release
@@ -157,6 +171,27 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./WoL-go-windows-386.exe
           asset_name: WoL-go-windows-386.exe
+          asset_content_type: application/octet-stream
+
+      # Upload the tray builds
+      - name: Upload Windows AMD64 Tray Binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./WoL-go-windows-amd64-tray.exe
+          asset_name: WoL-go-windows-amd64-tray.exe
+          asset_content_type: application/octet-stream
+
+      - name: Upload Windows 386 Tray Binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./WoL-go-windows-386-tray.exe
+          asset_name: WoL-go-windows-386-tray.exe
           asset_content_type: application/octet-stream
 
       # Upload binary for darwin/amd64
