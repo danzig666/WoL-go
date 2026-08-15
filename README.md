@@ -1,49 +1,135 @@
 # WoL-go
-A tool for controlling and implementing Wake-on-LAN (WoL) from a web interface.
 
-## Overview
-WoL-go is a utility designed to enable remote wake-up of machines through a user-friendly web interface. This tool is ideal for deployment on a router or any always-on machine within your local area network (LAN). It supports remote access via internal network penetration techniques or IPv6, making it possible to manage and wake your machines from anywhere.
+Wake your computers over the network from a browser, a phone, or the Windows
+system tray. Single binary, no dependencies, embedded web interface.
+
+![License](https://img.shields.io/badge/license-MIT-blue)
+
+> **Written by AI.** Nearly all of the code in this fork was written by
+> [Claude](https://claude.com/claude-code) (Anthropic), directed and tested by
+> a human against a real network. It works and has been exercised in practice —
+> waking real machines, scanning a real LAN — but read it before you trust it
+> with anything that matters, as you would with any code you did not write.
+
+A fork of [celyrin/WoL-go](https://github.com/celyrin/WoL-go), substantially
+rewritten: pure-Go SQLite, a new interface, network discovery, per-user access,
+state history, and a rebuilt authentication layer.
 
 ## Features
-- **Web-based Interface**: Easy to use and accessible from a browser.
-- **Cross-platform Support**: Binaries available for multiple operating systems and architectures.
-- **Remote Accessibility**: Manage wake-up functionality through internal network penetration or IPv6.
 
-## Getting Started
+- **Find computers** — scans your LAN and lists every machine with its IP, MAC,
+  name and manufacturer, so you can add them with a tick rather than hunting
+  for MAC addresses.
+- **Manufacturer names** — the full IEEE registry (54,000 prefixes) is embedded,
+  so unnamed hardware still shows as "Dell", "Sonos" or "Raspberry Pi".
+- **Live status** — on, asleep (still on the network, ready to wake), or no reply.
+- **History** — every machine's state recorded each minute and kept for three
+  years, with timelines, usage heatmaps and a wake log. Administrator only.
+- **Remote access** — behind Cloudflare Access, each person sees only the
+  computers shared with their email address.
+- **Windows tray app** — no console window, optional start with Windows.
+- Dark, responsive interface; drag to reorder; works on a phone.
 
-### Prerequisites
-To use WoL-go, you will need:
-- A machine that is always on within your LAN, such as a router.
-- [Go installed](https://golang.org/dl/) if you plan to compile the project yourself.
+## Getting started
 
-### Download
-You can directly download the pre-compiled binaries suited for your system architecture from the [Releases page](https://github.com/yourusername/WoL-go/releases).
-
-### Compilation
-If you prefer to compile the binary yourself, use the following commands adjusted for your target operating system and architecture:
-
-```bash
-# For Linux amd64
-GOOS=linux GOARCH=amd64 go build -o WoL-go main.go
-
-# Example for Windows amd64
-GOOS=windows GOARCH=amd64 go build -o WoL-go.exe main.go
-```
-
-### Running the Server
-To start the service, run the following command:
+Download a binary from [Releases](https://github.com/danzig666/WoL-go/releases),
+or build it yourself (see below). Then run it:
 
 ```bash
 ./WoL-go
 ```
 
-Then, access the web interface by navigating to `http://localhost:9543` in your web browser.
+Open `http://localhost:9543`. On first start an `admin` account is created with
+a random password, printed once to the console — or shown in a dialog by the
+tray build, which has no console. Write it down; you will be asked to change it
+at first sign-in.
 
-## Usage
-Once WoL-go is running, you can add the MAC addresses of the machines you want to be able to wake up. Use the web interface to manage these addresses and initiate the wake-up command.
+On Windows, `WoL-go-windows-amd64-tray.exe` is the one most people want: no
+console window, just an icon in the notification area. Right-click it for the
+control panel, wake-all, the log, and a "start with Windows" tick box.
 
-## Contributing
-Contributions are welcome! Feel free to open pull requests or issues to improve the functionality or documentation of WoL-go.
+`wol.db` and `wol.log` live **next to the executable**, not in the working
+directory, so shortcuts and autostart always find the same database.
+
+### Waking actually working
+
+Wake-on-LAN needs a few things set on the target machine, once:
+
+1. Enable Wake-on-LAN in its BIOS/UEFI.
+2. Windows: Device Manager → your network adapter → Power Management → allow it
+   to wake the computer.
+3. Turn off Windows fast startup, which blocks waking from a full shutdown.
+4. Use a cable if you can; Wi-Fi wake is unreliable.
+
+The **?** button in the app explains the same thing in more detail.
+
+## Who can see what
+
+| | Sees |
+| --- | --- |
+| **Administrator** (signed in) | Everything, plus all management |
+| **Local network** | Every computer, wake only — no MAC, IP or notes |
+| **Cloudflare visitor** | Only the computers shared with their email |
+
+Waking needs no password by default, so it works from a phone without hunting
+for credentials. Run with `-public-wake=false` to require a sign-in for that too.
+
+### Cloudflare Access
+
+If you publish the service through a Cloudflare tunnel with Access in front, it
+can recognise each visitor by their authenticated email and show them only what
+you have shared.
+
+`Cf-Access-Authenticated-User-Email` is an ordinary HTTP header, so it is
+believed **only** from source addresses you nominate — otherwise anyone able to
+reach the service could claim to be anyone. Set that address under
+**People → Cloudflare Access setup** (usually `localhost`, where `cloudflared`
+runs). The same panel lists what the server has actually received, which is what
+tells you whether the tunnel, Access, or the setting is at fault.
+
+Two consequences: anything running on the trusted host can impersonate any
+address, and the service must not be reachable from the internet except through
+the tunnel.
+
+## Options
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-h`, `-p` | `0.0.0.0`, `9543` | Bind address and port |
+| `-public-wake` | `true` | Allow waking without signing in |
+| `-cf-trust` | *(unset)* | Addresses whose Cloudflare headers are trusted; also settable in the UI |
+| `-no-tray` | `false` | Run without the Windows tray icon |
+| `-debug` | `false` | Verbose request logging |
+
+## Building
+
+Pure Go — no cgo, no C compiler, and cross-compilation works out of the box.
+
+```bash
+go build -o WoL-go .                                          # console build
+go build -o WoL-go-tray.exe -ldflags "-H windowsgui" .        # Windows tray build
+```
+
+Regenerating the embedded assets is only needed if you change them:
+
+```bash
+go run ./tools/genoui     # refresh the IEEE manufacturer table -> data/oui.gz
+go run ./tools/genicon    # redraw the application icon -> data/icon.ico
+```
+
+## Security notes
+
+- Passwords are bcrypt hashed; the JWT signing key is random per installation.
+  Changing a password invalidates existing sessions.
+- Failed sign-ins are rate limited per address, as are anonymous wake requests.
+- Cloudflare visitors never receive MAC addresses, IP addresses or notes.
+- The service speaks plain HTTP — put it behind a reverse proxy with TLS or
+  reach it over a VPN. Do not expose it directly to the internet.
+- Upgrading from an older version migrates the database automatically. Keep a
+  copy of `wol.db` first; the database runs in WAL mode, so copy all three
+  `wol.db*` files, or stop the service before copying.
 
 ## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+MIT — see [LICENSE](LICENSE). Original work © the
+[celyrin/WoL-go](https://github.com/celyrin/WoL-go) authors.
