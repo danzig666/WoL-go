@@ -1,219 +1,71 @@
-﻿name: Build and Release
+name: Build and Release
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  build:
-    name: Build Release Binaries
+  release:
+    name: Build and publish binaries
     runs-on: ubuntu-latest
+
     steps:
-      - name: Set up Go
-        uses: actions/setup-go@v2
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
 
-      - name: Check out code
-        uses: actions/checkout@v2
-
-      # Build binary for linux/amd64
-      - name: Build binary for Linux AMD64
+      # Pure Go, so every target cross-compiles from one runner with no C
+      # toolchain. The Windows icon comes from the committed .syso resources,
+      # which the linker picks up per architecture.
+      - name: Build every target
         run: |
-          export GOOS=linux
-          export GOARCH=amd64
-          go mod tidy
-          go build -o WoL-go-linux-amd64 -ldflags "-X main.defaultMode=release -s -w" .
+          set -eu
+          mkdir -p dist
 
-      # Build binary for linux/386
-      - name: Build binary for Linux 386
+          build() {   # os arch suffix extra-ldflags
+            echo "building $1/$2 $4"
+            GOOS="$1" GOARCH="$2" CGO_ENABLED=0 go build \
+              -trimpath \
+              -ldflags "-X main.defaultMode=release -s -w $4" \
+              -o "dist/WoL-go-$1-$2$3" .
+          }
+
+          build linux   amd64 ""   ""
+          build linux   386   ""   ""
+          build linux   arm   ""   ""
+          build linux   arm64 ""   ""
+          build darwin  amd64 ""   ""
+          build darwin  arm64 ""   ""
+          build windows amd64 .exe ""
+          build windows 386   .exe ""
+          build windows arm64 .exe ""
+
+          # Tray builds are the same program linked for the GUI subsystem, so
+          # Windows gives them no console window.
+          build windows amd64 -tray.exe "-H windowsgui"
+          build windows 386   -tray.exe "-H windowsgui"
+          build windows arm64 -tray.exe "-H windowsgui"
+
+          ls -l dist
+
+      - name: Checksums
         run: |
-          export GOOS=linux
-          export GOARCH=386
-          go mod tidy
-          go build -o WoL-go-linux-386 -ldflags "-X main.defaultMode=release -s -w" .
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
-      # Build binary for linux/arm
-      - name: Build binary for Linux ARM
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          export GOOS=linux
-          export GOARCH=arm
-          go mod tidy
-          go build -o WoL-go-linux-arm -ldflags "-X main.defaultMode=release -s -w" .
-
-      # Build binary for linux/arm64
-      - name: Build binary for Linux ARM64
-        run: |
-          export GOOS=linux
-          export GOARCH=arm64
-          go mod tidy
-          go build -o WoL-go-linux-arm64 -ldflags "-X main.defaultMode=release -s -w" .
-
-      # Build binary for windows/amd64
-      - name: Build binary for Windows AMD64
-        run: |
-          export GOOS=windows
-          export GOARCH=amd64
-          go mod tidy
-          go build -o WoL-go-windows-amd64.exe -ldflags "-X main.defaultMode=release -s -w" .
-
-      # Build binary for windows/386
-      - name: Build binary for Windows 386
-        run: |
-          export GOOS=windows
-          export GOARCH=386
-          go mod tidy
-          go build -o WoL-go-windows-386.exe -ldflags "-X main.defaultMode=release -s -w" .
-
-      # Windows tray builds: same program, linked for the GUI subsystem so no
-      # console window appears. These are the ones most Windows users want.
-      - name: Build tray binary for Windows AMD64
-        run: |
-          export GOOS=windows
-          export GOARCH=amd64
-          go build -o WoL-go-windows-amd64-tray.exe -ldflags "-H windowsgui -X main.defaultMode=release -s -w" .
-
-      - name: Build tray binary for Windows 386
-        run: |
-          export GOOS=windows
-          export GOARCH=386
-          go build -o WoL-go-windows-386-tray.exe -ldflags "-H windowsgui -X main.defaultMode=release -s -w" .
-
-      # Build binary for darwin/amd64
-      - name: Build binary for Darwin AMD64
-        run: |
-          export GOOS=darwin
-          export GOARCH=amd64
-          go mod tidy
-          go build -o WoL-go-darwin-amd64 -ldflags "-X main.defaultMode=release -s -w" .
-
-      # Build binary for darwin/arm64
-      - name: Build binary for Darwin ARM64
-        run: |
-          export GOOS=darwin
-          export GOARCH=arm64
-          go mod tidy
-          go build -o WoL-go-darwin-arm64 -ldflags "-X main.defaultMode=release -s -w" .
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-
-      # Upload binary for linux/amd64
-      - name: Upload Linux AMD64 Binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./WoL-go-linux-amd64
-          asset_name: WoL-go-linux-amd64
-          asset_content_type: application/octet-stream
-
-      # Upload binary for linux/386
-      - name: Upload Linux 386 Binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./WoL-go-linux-386
-          asset_name: WoL-go-linux-386
-          asset_content_type: application/octet-stream
-
-      # Upload binary for linux/arm
-      - name: Upload Linux ARM Binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./WoL-go-linux-arm
-          asset_name: WoL-go-linux-arm
-          asset_content_type: application/octet-stream
-
-      # Upload binary for linux/arm64
-      - name: Upload Linux ARM64 Binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./WoL-go-linux-arm64
-          asset_name: WoL-go-linux-arm64
-          asset_content_type: application/octet-stream
-
-      # Upload binary for windows/amd64
-      - name: Upload Windows AMD64 Binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./WoL-go-windows-amd64.exe
-          asset_name: WoL-go-windows-amd64.exe
-          asset_content_type: application/octet-stream
-
-      # Upload binary for windows/386
-      - name: Upload Windows 386 Binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./WoL-go-windows-386.exe
-          asset_name: WoL-go-windows-386.exe
-          asset_content_type: application/octet-stream
-
-      # Upload the tray builds
-      - name: Upload Windows AMD64 Tray Binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./WoL-go-windows-amd64-tray.exe
-          asset_name: WoL-go-windows-amd64-tray.exe
-          asset_content_type: application/octet-stream
-
-      - name: Upload Windows 386 Tray Binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./WoL-go-windows-386-tray.exe
-          asset_name: WoL-go-windows-386-tray.exe
-          asset_content_type: application/octet-stream
-
-      # Upload binary for darwin/amd64
-      - name: Upload Darwin AMD64 Binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./WoL-go-darwin-amd64
-          asset_name: WoL-go-darwin-amd64
-          asset_content_type: application/octet-stream
-
-      # Upload binary for darwin/arm64
-      - name: Upload Darwin ARM64 Binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./WoL-go-darwin-arm64
-          asset_name: WoL-go-darwin-arm64
-          asset_content_type: application/octet-stream
-
-
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
