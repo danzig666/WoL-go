@@ -494,6 +494,10 @@ func createTables(db *sql.DB) {
 	addColumnIfMissing(db, "devices", "vendor TEXT")
 	addColumnIfMissing(db, "devices", "last_seen INTEGER NOT NULL DEFAULT 0")
 	addColumnIfMissing(db, "devices", "sort_order INTEGER NOT NULL DEFAULT 0")
+	// Whether people other than the administrator may put this computer to
+	// sleep. Off unless chosen: waking someone's machine is harmless, but
+	// sleeping one interrupts whoever is using it.
+	addColumnIfMissing(db, "devices", "sleep_public INTEGER NOT NULL DEFAULT 0")
 }
 
 // backfillVendors fills in the manufacturer for rows saved before it was

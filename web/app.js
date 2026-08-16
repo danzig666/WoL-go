@@ -773,9 +773,12 @@ async function refreshAgentBlock(device) {
     // Only meaningful for a saved device, since pairing needs its id.
     block.classList.toggle('visible', !!device);
     $('agentSteps').classList.remove('visible');
+    $('sleepPublicRow').classList.remove('visible');
     if (!device) {
         return;
     }
+
+    $('deviceSleepPublic').checked = !!device.sleep_public;
 
     $('agentTargetName').textContent = device.name;
 
@@ -811,6 +814,9 @@ async function refreshAgentBlock(device) {
         (warnings.length ? ' · ' + warnings.join(', ') : '');
     $('agentSetupButton').textContent = 'Pair again';
     $('agentRemoveButton').style.display = '';
+
+    // Who may sleep it is only a question once something can sleep it.
+    $('sleepPublicRow').classList.add('visible');
 }
 
 $('agentSetupButton').addEventListener('click', async (event) => {
@@ -944,6 +950,7 @@ $('deviceForm').addEventListener('submit', async (event) => {
         notes: $('deviceNotes').value.trim(),
         broadcast: $('deviceBroadcast').value.trim(),
         port: parseInt($('devicePort').value, 10) || 0,
+        sleep_public: $('deviceSleepPublic').checked,
     };
 
     if (!payload.mac) {

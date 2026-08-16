@@ -214,6 +214,16 @@
                         </div>
                         <button type="button" class="btn btn-secondary" id="agentSetupButton">Set up</button>
                     </div>
+                    <label class="agent-permission" id="sleepPublicRow">
+                        <input type="checkbox" id="deviceSleepPublic">
+                        <span>
+                            <strong>Let other people put it to sleep</strong>
+                            <span class="field-help">Anyone on your network, and Cloudflare visitors this
+                            computer is shared with. Waking is always open to them; sleeping interrupts
+                            whoever is using it, so it is off until you allow it.</span>
+                        </span>
+                    </label>
+
                     <div class="agent-steps" id="agentSteps">
                         <p class="hint">On <strong id="agentTargetName">that computer</strong>, download
                         <code>wol-agent.exe</code> from the releases page, open a

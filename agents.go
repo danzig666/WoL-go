@@ -302,6 +302,23 @@ func sleepDevice(c *gin.Context) {
 		return
 	}
 
+	// Sleeping interrupts whoever is using the machine, so anyone other than
+	// the administrator needs it to have been allowed for that computer.
+	if !identity.isAdmin() {
+		device, err := deviceByID(deviceID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "That device no longer exists"})
+			return
+		}
+		if !device.SleepPublic {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "Only the administrator can put this computer to sleep",
+			})
+			log.Printf("Refused sleep of %q for %s: not allowed for others", device.Name, wakeActor(identity))
+			return
+		}
+	}
+
 	var body struct {
 		Force bool `json:"force"`
 	}

@@ -166,6 +166,18 @@ wol-agent.exe install --server https://wol.example.com --code XXXX-XXXX ^
 The agent then sends `CF-Access-Client-Id` and `CF-Access-Client-Secret` on
 every request, which is how Access authenticates a machine.
 
+### Who may sleep a computer
+
+The administrator always can. Everyone else — people on your own network, and
+Cloudflare visitors the computer is shared with — needs it allowed for that
+particular machine: tick **Let other people put it to sleep** when editing it.
+
+It is off until you allow it, and deliberately not the same rule as waking.
+Waking someone's machine is harmless; sleeping one interrupts whoever is
+sitting at it, so it is worth choosing per computer rather than in general.
+The Sleep button only appears for people who are allowed to use it, and the
+server checks again when the button is pressed.
+
 **On purpose, the agent understands three things: sleep, sleep by force, and
 report on itself.** There is no command that runs a program, so a stolen agent
 token cannot become a shell on that machine — it can only make one computer

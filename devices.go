@@ -41,16 +41,21 @@ type Device struct {
 	// which is what decides if the interface offers a Sleep button.
 	CanSleep    bool `json:"can_sleep"`
 	AgentOnline bool `json:"agent_online"`
+	// SleepPublic lets people other than the administrator sleep this
+	// computer: anyone on the local network, and Cloudflare visitors it has
+	// been shared with.
+	SleepPublic bool `json:"sleep_public"`
 }
 
 const deviceColumns = "id, name, mac, COALESCE(ip, ''), COALESCE(notes, ''), COALESCE(broadcast, ''), " +
 	"COALESCE(port, 9), COALESCE(last_woken, 0), COALESCE(created_at, 0), " +
-	"COALESCE(vendor, ''), COALESCE(hostname, ''), COALESCE(last_seen, 0)"
+	"COALESCE(vendor, ''), COALESCE(hostname, ''), COALESCE(last_seen, 0), " +
+	"COALESCE(sleep_public, 0)"
 
 func scanDevice(row interface{ Scan(...interface{}) error }) (Device, error) {
 	var d Device
 	err := row.Scan(&d.ID, &d.Name, &d.MAC, &d.IP, &d.Notes, &d.Broadcast, &d.Port,
-		&d.LastWoken, &d.CreatedAt, &d.Vendor, &d.Hostname, &d.LastSeen)
+		&d.LastWoken, &d.CreatedAt, &d.Vendor, &d.Hostname, &d.LastSeen, &d.SleepPublic)
 	if err == nil && d.Vendor == "" {
 		// Older rows, or a manufacturer the table did not know at the time.
 		d.Vendor = vendorForMAC(d.MAC)
@@ -156,8 +161,9 @@ type deviceInput struct {
 	// Hostname is supplied by the scan results when computers are added from
 	// a discovery, so what the machine calls itself is kept alongside
 	// whatever the user chooses to name it.
-	Hostname string `json:"hostname"`
-	Vendor   string `json:"vendor"`
+	Hostname    string `json:"hostname"`
+	Vendor      string `json:"vendor"`
+	SleepPublic bool   `json:"sleep_public"`
 }
 
 // validate cleans up user input and returns a friendly message on failure.
@@ -232,9 +238,9 @@ func createDevice(c *gin.Context) {
 	res, err := db.Exec(
 		// New entries go to the end of the list rather than jumping into the
 		// middle of an arrangement the user has already made.
-		`INSERT INTO devices (name, mac, ip, notes, broadcast, port, created_at, vendor, hostname, sort_order)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM devices))`,
-		in.Name, in.MAC, in.IP, in.Notes, in.Broadcast, in.Port, time.Now().Unix(), in.Vendor, in.Hostname,
+		`INSERT INTO devices (name, mac, ip, notes, broadcast, port, created_at, vendor, hostname, sleep_public, sort_order)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM devices))`,
+		in.Name, in.MAC, in.IP, in.Notes, in.Broadcast, in.Port, time.Now().Unix(), in.Vendor, in.Hostname, in.SleepPublic,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -284,9 +290,9 @@ func createDevicesBulk(c *gin.Context) {
 		_, err := db.Exec(
 			// New entries go to the end of the list rather than jumping into the
 			// middle of an arrangement the user has already made.
-			`INSERT INTO devices (name, mac, ip, notes, broadcast, port, created_at, vendor, hostname, sort_order)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM devices))`,
-			in.Name, in.MAC, in.IP, in.Notes, in.Broadcast, in.Port, time.Now().Unix(), in.Vendor, in.Hostname,
+			`INSERT INTO devices (name, mac, ip, notes, broadcast, port, created_at, vendor, hostname, sleep_public, sort_order)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM devices))`,
+			in.Name, in.MAC, in.IP, in.Notes, in.Broadcast, in.Port, time.Now().Unix(), in.Vendor, in.Hostname, in.SleepPublic,
 		)
 		switch {
 		case err == nil:
@@ -321,8 +327,8 @@ func updateDevice(c *gin.Context) {
 	}
 
 	res, err := db.Exec(
-		"UPDATE devices SET name = ?, mac = ?, ip = ?, notes = ?, broadcast = ?, port = ?, vendor = ?, hostname = COALESCE(NULLIF(?, ''), hostname) WHERE id = ?",
-		in.Name, in.MAC, in.IP, in.Notes, in.Broadcast, in.Port, in.Vendor, in.Hostname, id,
+		"UPDATE devices SET name = ?, mac = ?, ip = ?, notes = ?, broadcast = ?, port = ?, vendor = ?, hostname = COALESCE(NULLIF(?, ''), hostname), sleep_public = ? WHERE id = ?",
+		in.Name, in.MAC, in.IP, in.Notes, in.Broadcast, in.Port, in.Vendor, in.Hostname, in.SleepPublic, id,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -638,6 +644,10 @@ type PublicDevice struct {
 	Name      string `json:"name"`
 	Vendor    string `json:"vendor"`
 	LastWoken int64  `json:"last_woken"`
+	// CanSleep is true only where an agent is installed and the administrator
+	// has allowed others to sleep this particular computer.
+	CanSleep    bool `json:"can_sleep"`
+	AgentOnline bool `json:"agent_online"`
 }
 
 func listPublicDevices(c *gin.Context) {
@@ -651,10 +661,12 @@ func listPublicDevices(c *gin.Context) {
 	out := make([]PublicDevice, 0, len(devices))
 	for _, d := range devices {
 		out = append(out, PublicDevice{
-			ID:        d.ID,
-			Name:      d.Name,
-			Vendor:    d.Vendor,
-			LastWoken: d.LastWoken,
+			ID:          d.ID,
+			Name:        d.Name,
+			Vendor:      d.Vendor,
+			LastWoken:   d.LastWoken,
+			CanSleep:    d.CanSleep && d.SleepPublic,
+			AgentOnline: d.AgentOnline,
 		})
 	}
 	c.JSON(http.StatusOK, out)
