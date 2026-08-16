@@ -16,6 +16,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"strings"
 
 	"WoL-go/internal/release"
 )
@@ -30,7 +31,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	secret := os.Getenv("WOLGO_SIGNING_KEY")
+	// Trimmed, because how the secret was stored is not worth debugging in a
+	// release build: setting it from a file leaves a trailing newline, and
+	// base64 decoding would fail on it.
+	secret := strings.TrimSpace(os.Getenv("WOLGO_SIGNING_KEY"))
 	if secret == "" {
 		fail("WOLGO_SIGNING_KEY is not set")
 	}
