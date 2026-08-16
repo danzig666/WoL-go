@@ -27,9 +27,15 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"WoL-go/internal/binswap"
+	"WoL-go/internal/release"
 )
 
-const version = "1.1.1"
+// version is stamped in by the release build with
+// -ldflags "-X main.version=v1.2.0". A plain "go build" leaves the development
+// value, which compares as older than any release.
+var version = release.DevVersion
 
 // heartbeatEvery is how often the agent reports in. It also decides how
 // quickly the panel notices a machine has gone.
@@ -104,6 +110,22 @@ func main() {
 		os.Exit(2)
 	}
 
+	// The helper runs before anything else, because it is a detached copy of a
+	// newly installed binary whose only job is to restart the service.
+	if os.Args[1] == "apply-update" {
+		runApplyUpdate(os.Args[2:])
+		return
+	}
+
+	// Repair an update that was interrupted between its two renames, so
+	// whatever runs next finds a working installation.
+	if exe, err := os.Executable(); err == nil {
+		if err := binswap.Recover(exe); err != nil {
+			log.Printf("could not recover the previous executable: %v", err)
+		}
+		binswap.Cleanup(exe)
+	}
+
 	switch os.Args[1] {
 	case "install":
 		runInstall(os.Args[2:])
@@ -137,6 +159,17 @@ func main() {
 		if err := suspend(force); err != nil {
 			log.Fatalf("could not sleep: %v", err)
 		}
+	case "update":
+		// Updating by hand, for a machine being looked at directly. The server
+		// still supplies the binary, and the signature is still what decides
+		// whether it is installed.
+		cfg, err := loadConfig()
+		if err != nil {
+			log.Fatalf("not paired yet: %v", err)
+		}
+		if err := upgrade(cfg); err != nil {
+			log.Fatalf("could not update: %v", err)
+		}
 	case "status":
 		runStatus()
 	case "version":
@@ -161,8 +194,12 @@ func usage() {
         Remove the service and forget the token.
 
   wol-agent stop | start | restart
-        Control the service. To update the agent: stop, replace the .exe,
-        start. The pairing is kept, so no new code is needed.
+        Control the service.
+
+  wol-agent update
+        Fetch the newest signed agent from the server and install it. Normally
+        done from the WoL-go panel instead. The service restarts; the computer
+        does not, and nobody is signed out.
 
   wol-agent run
         Run in the foreground (what the service does).
@@ -374,7 +411,7 @@ func serve(cfg config) {
 		}
 
 		log.Printf("received command %q", command)
-		err = carryOut(command)
+		err = carryOut(cfg, command)
 		report(cfg, command, err)
 	}
 }
@@ -411,12 +448,14 @@ func pollOnce(ctx context.Context, client *http.Client, cfg config) (string, err
 	return reply.Command, nil
 }
 
-func carryOut(command string) error {
+func carryOut(cfg config, command string) error {
 	switch command {
 	case "sleep":
 		return suspend(false)
 	case "sleep-force":
 		return suspend(true)
+	case "upgrade":
+		return upgrade(cfg)
 	default:
 		return fmt.Errorf("unknown command %q", command)
 	}

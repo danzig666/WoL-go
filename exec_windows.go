@@ -8,7 +8,13 @@ import (
 )
 
 // CREATE_NO_WINDOW: the child runs without allocating a console.
-const createNoWindow = 0x08000000
+// DETACHED_PROCESS: the child gets no console at all and does not inherit ours.
+// CREATE_NEW_PROCESS_GROUP: it is not signalled when this process is.
+const (
+	createNoWindow        = 0x08000000
+	detachedProcess       = 0x00000008
+	createNewProcessGroup = 0x00000200
+)
 
 // hiddenCommand builds a command that does not flash a console window.
 //
@@ -21,6 +27,19 @@ func hiddenCommand(name string, args ...string) *exec.Cmd {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: createNoWindow,
+	}
+	return cmd
+}
+
+// detachedCommand builds a command that outlives this process.
+//
+// It is used for the one job that cannot be done from inside the program being
+// replaced: waiting for it to exit, and then starting its replacement.
+func detachedCommand(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: detachedProcess | createNewProcessGroup,
 	}
 	return cmd
 }

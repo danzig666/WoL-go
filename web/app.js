@@ -169,6 +169,7 @@ function startSession(token, username) {
     showView('main');
     loadDevices();
     startStatusPolling();
+    checkUpdatesQuietly();
 }
 
 function startStatusPolling() {
@@ -1795,6 +1796,296 @@ document.addEventListener('keydown', (event) => {
 
 /* ---------------- Confirm dialog ---------------- */
 
+/* ---------------- Updates ---------------- */
+
+/* Checking happens by itself; everything that changes a program on a computer
+   is a button somebody presses. The order on screen is the order it has to
+   happen in: fetch the release, then this server, then the agents. */
+
+const updates = { data: null, poll: null };
+
+async function openUpdatesModal() {
+    openModal('updatesModal');
+    hideError('updateError');
+    $('updateState').textContent = 'Looking...';
+    await loadUpdates();
+}
+
+async function loadUpdates() {
+    try {
+        updates.data = await api('/api/updates');
+        renderUpdates();
+    } catch (err) {
+        showError('updateError', err.message);
+    }
+}
+
+function renderUpdates() {
+    const data = updates.data;
+    if (!data) return;
+
+    $('updateCurrent').textContent = data.current || 'unknown';
+    $('updateLatest').textContent = data.latest || 'not checked yet';
+    $('updateCheckEnabled').checked = !!data.check_enabled;
+
+    $('updateCheckedAt').textContent = data.checked_at
+        ? 'Last checked ' + relativeTime(data.checked_at) + '.'
+        : 'Not checked yet.';
+
+    $('updateNotes').textContent = data.latest_notes || 'No release notes.';
+    $('updateLink').href = data.latest_url || '#';
+
+    const behindAgents = (data.agents || []).filter((a) => a.behind);
+    const summary = $('updateState');
+    summary.classList.remove('available');
+
+    if (data.check_error) {
+        summary.textContent = 'Could not check: ' + data.check_error;
+    } else if (data.downloading) {
+        summary.textContent = 'Downloading ' + data.latest + ' - ' + (data.download_step || 'working');
+    } else if (!data.latest) {
+        summary.textContent = 'No release has been found yet.';
+    } else if (data.server_behind || behindAgents.length) {
+        summary.classList.add('available');
+        const parts = [];
+        if (data.server_behind) parts.push('this server');
+        if (behindAgents.length) {
+            parts.push(behindAgents.length === 1 ? '1 computer' : behindAgents.length + ' computers');
+        }
+        summary.textContent = data.latest + ' is available for ' + parts.join(' and ') + '.';
+    } else {
+        summary.textContent = 'Everything is up to date.';
+    }
+
+    if (data.download_error) {
+        showError('updateError', data.download_error);
+    }
+
+    // Step 1: fetching the release.
+    const downloaded = data.downloaded && data.downloaded === data.latest;
+    const downloadButton = $('updateDownloadButton');
+    // Only on a change: setLoading remembers the button's markup, and calling
+    // it twice while loading would remember the spinner as the label.
+    const busy = !!data.downloading;
+    if (downloadButton.classList.contains('loading') !== busy) {
+        setLoading(downloadButton, busy, 'Downloading');
+    }
+    downloadButton.disabled = !data.latest || busy || downloaded;
+    $('updateDownloadStep').classList.toggle('done', downloaded);
+    $('updateDownloadHint').textContent = downloaded
+        ? 'Release ' + data.downloaded + ' is here and its signature checked.'
+        : 'Downloaded here once, checked against its signature, and then handed to the agents. '
+          + 'The computers running an agent never contact GitHub themselves.';
+
+    // Step 2: this server.
+    const serverButton = $('updateServerButton');
+    serverButton.disabled = !data.server_behind || !downloaded || !data.server_can_apply;
+    $('updateServerStep').classList.toggle('done', !data.server_behind);
+    $('updateServerHint').textContent = !data.server_behind
+        ? 'Already running ' + data.current + '.'
+        : downloaded && !data.server_can_apply
+          ? 'That release has no build for this system (' + data.server_asset + ').'
+          : 'The service restarts and the page reconnects on its own. Takes a few seconds.';
+
+    // Step 3: the agents.
+    const canUpdateAgents = downloaded && behindAgents.some((a) => a.online);
+    $('updateAllAgentsButton').disabled = !canUpdateAgents;
+    $('updateAgentsStep').classList.toggle('done', downloaded && behindAgents.length === 0);
+
+    renderAgentUpdates(data.agents || [], downloaded);
+    refreshUpdateBadge(data);
+
+    // While a download runs, keep the panel honest about what it is doing.
+    if (data.downloading && !updates.poll) {
+        updates.poll = setInterval(async () => {
+            if (!$('updatesModal').classList.contains('open')) {
+                clearInterval(updates.poll);
+                updates.poll = null;
+                return;
+            }
+            await loadUpdates();
+            if (updates.data && !updates.data.downloading) {
+                clearInterval(updates.poll);
+                updates.poll = null;
+            }
+        }, 2000);
+    }
+}
+
+function renderAgentUpdates(agents, downloaded) {
+    const list = $('agentUpdateList');
+    list.textContent = '';
+    if (agents.length === 0) return;
+
+    agents.forEach((agent) => {
+        const row = document.createElement('div');
+        row.className = 'agent-update-row';
+        row.innerHTML = `
+            <span class="agent-name"></span>
+            <span class="agent-version"></span>
+            <span class="badge"></span>
+            <button type="button" class="btn btn-ghost">Update</button>`;
+
+        row.querySelector('.agent-name').textContent = agent.name || agent.hostname || 'Computer';
+        row.querySelector('.agent-version').textContent = agent.version || 'unknown';
+
+        const badge = row.querySelector('.badge');
+        if (!downloaded) {
+            // Nothing has been fetched, so there is no version to compare
+            // against. Saying "current" here would be a guess.
+            badge.hidden = true;
+        } else {
+            badge.textContent = agent.behind ? 'behind' : 'current';
+            badge.classList.add(agent.behind ? 'off' : 'on');
+        }
+
+        const button = row.querySelector('button');
+        // An agent that is asleep or switched off cannot be told anything; the
+        // command would expire long before it polls again.
+        button.disabled = !agent.behind || !agent.online || !downloaded;
+        if (agent.behind && !agent.online) {
+            button.textContent = 'Offline';
+        }
+        button.addEventListener('click', () => updateOneAgent(agent, button));
+
+        list.appendChild(row);
+    });
+}
+
+async function updateOneAgent(agent, button) {
+    setLoading(button, true);
+    try {
+        await api('/api/updates/agents/' + agent.agent_id, { method: 'POST' });
+        toast('Updating ' + (agent.name || 'the agent') + '. Only its service restarts.', 'success');
+        setTimeout(loadUpdates, 8000);
+    } catch (err) {
+        toast(err.message, 'error');
+    } finally {
+        setLoading(button, false, 'Update');
+    }
+}
+
+$('updatesButton').addEventListener('click', openUpdatesModal);
+
+$('updateCheckButton').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    setLoading(button, true);
+    hideError('updateError');
+    try {
+        await api('/api/updates/check', { method: 'POST' });
+        await loadUpdates();
+    } catch (err) {
+        showError('updateError', err.message);
+    } finally {
+        setLoading(button, false, 'Check now');
+    }
+});
+
+$('updateDownloadButton').addEventListener('click', async () => {
+    hideError('updateError');
+    try {
+        await api('/api/updates/download', { method: 'POST' });
+        await loadUpdates();
+    } catch (err) {
+        showError('updateError', err.message);
+    }
+});
+
+$('updateAllAgentsButton').addEventListener('click', async (event) => {
+    const behind = (updates.data.agents || []).filter((a) => a.behind && a.online);
+    const ok = await confirmDialog(
+        'Update the sleep agent on ' + behind.length + ' computer'
+        + (behind.length === 1 ? '' : 's')
+        + '? Only the small agent service restarts on each one - nobody is signed out '
+        + 'and no computer restarts.',
+        'Update them');
+    if (!ok) return;
+
+    const button = event.currentTarget;
+    setLoading(button, true);
+    try {
+        const result = await api('/api/updates/agents', { method: 'POST' });
+        toast('Updating ' + result.sent + ' agent' + (result.sent === 1 ? '' : 's') + '.', 'success');
+        setTimeout(loadUpdates, 10000);
+    } catch (err) {
+        toast(err.message, 'error');
+    } finally {
+        setLoading(button, false, 'Update all');
+    }
+});
+
+$('updateServerButton').addEventListener('click', async (event) => {
+    const ok = await confirmDialog(
+        'Update this server to ' + updates.data.latest + '? It stops and starts again, '
+        + 'which takes a few seconds. Waking and sleeping will not work during that time. '
+        + 'If the new version will not start, the previous one is put back automatically.',
+        'Update and restart');
+    if (!ok) return;
+
+    const button = event.currentTarget;
+    setLoading(button, true);
+    try {
+        const result = await api('/api/updates/server', { method: 'POST' });
+        toast(result.message, 'success');
+        waitForServerToComeBack();
+    } catch (err) {
+        toast(err.message, 'error');
+        setLoading(button, false, 'Update server');
+    }
+});
+
+// After the server restarts its address answers again, at which point the page
+// is reloaded so the new interface is the one on screen.
+function waitForServerToComeBack() {
+    $('updateState').textContent = 'Restarting...';
+    let attempts = 0;
+    const timer = setInterval(async () => {
+        attempts += 1;
+        try {
+            const config = await api('/api/config');
+            if (config) {
+                clearInterval(timer);
+                $('updateState').textContent = 'Back up, running ' + (config.version || '') + '. Reloading.';
+                setTimeout(() => window.location.reload(), 800);
+            }
+        } catch (err) {
+            if (attempts > 60) {
+                clearInterval(timer);
+                showError('updateError',
+                    'The server has not come back after a minute. It may still be starting; '
+                    + 'reload the page in a moment.');
+            }
+        }
+    }, 1500);
+}
+
+$('updateCheckEnabled').addEventListener('change', async (event) => {
+    const on = event.currentTarget.checked;
+    try {
+        await api('/api/updates/settings', { method: 'PUT', body: { check: on } });
+        toast(on ? 'Checking for updates daily.' : 'Automatic update checks are off.', 'success');
+    } catch (err) {
+        event.currentTarget.checked = !on;
+        toast(err.message, 'error');
+    }
+});
+
+function refreshUpdateBadge(data) {
+    const behind = data.server_behind || (data.agents || []).some((a) => a.behind);
+    $('updateBadge').hidden = !behind;
+}
+
+// A quiet check when the administrator signs in, so the dot is there without
+// anybody having gone looking for it.
+async function checkUpdatesQuietly() {
+    if (!state.token) return;
+    try {
+        refreshUpdateBadge(await api('/api/updates'));
+    } catch (err) {
+        /* Not being able to say is not worth saying. */
+    }
+}
+
 let confirmResolver = null;
 
 function confirmDialog(message, okLabel) {
@@ -1856,6 +2147,7 @@ async function init() {
         showView('main');
         loadDevices();
         startStatusPolling();
+        checkUpdatesQuietly();
         return;
     }
 

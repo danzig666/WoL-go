@@ -2,7 +2,10 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os/exec"
+)
 
 // The agent is a Windows program: sleeping a machine, the service model and
 // the power settings it reports are all Windows specific. These stubs exist so
@@ -32,6 +35,13 @@ func startService() error {
 func serviceStopChannel() <-chan struct{} {
 	return make(chan struct{})
 }
+
+func serviceRunning() bool   { return false }
+func serviceInstalled() bool { return false }
+
+func hiddenCommand(name string, args ...string) *exec.Cmd { return exec.Command(name, args...) }
+
+func applyDetached(cmd *exec.Cmd) {}
 
 func wakeArmed() (bool, bool)          { return false, false }
 func fastStartupEnabled() (bool, bool) { return false, false }

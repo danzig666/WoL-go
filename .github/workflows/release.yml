@@ -29,11 +29,17 @@ jobs:
           set -eu
           mkdir -p dist
 
+          # The tag is stamped into every binary. It is what the update
+          # mechanism compares, so an unstamped build would offer to update
+          # itself forever.
+          VERSION="${GITHUB_REF_NAME}"
+          echo "building $VERSION"
+
           build() {   # os arch suffix extra-ldflags
             echo "building $1/$2 $4"
             GOOS="$1" GOARCH="$2" CGO_ENABLED=0 go build \
               -trimpath \
-              -ldflags "-X main.defaultMode=release -s -w $4" \
+              -ldflags "-X main.defaultMode=release -X main.appVersion=$VERSION -s -w $4" \
               -o "dist/WoL-go-$1-$2$3" .
           }
 
@@ -60,7 +66,7 @@ jobs:
             echo "building agent windows/$1"
             GOOS=windows GOARCH="$1" CGO_ENABLED=0 go build \
               -trimpath \
-              -ldflags "-s -w" \
+              -ldflags "-X main.version=$VERSION -s -w" \
               -o "dist/wol-agent-windows-$1.exe" ./cmd/wol-agent
           }
           agent amd64
@@ -74,6 +80,25 @@ jobs:
           cd dist
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
+
+      # The signature is what lets an already-installed agent decide whether to
+      # run a new binary. It verifies against the public key compiled into it,
+      # so nothing between here and that machine - not even its own WoL-go
+      # server - can substitute a different build.
+      #
+      # A release without this step still installs by hand, but no agent will
+      # update itself from it.
+      - name: Sign the checksums
+        env:
+          WOLGO_SIGNING_KEY: ${{ secrets.WOLGO_SIGNING_KEY }}
+        run: |
+          set -eu
+          if [ -z "${WOLGO_SIGNING_KEY:-}" ]; then
+            echo "::error::WOLGO_SIGNING_KEY is not set. Agents cannot update themselves from an unsigned release."
+            exit 1
+          fi
+          go run ./tools/sign dist/SHA256SUMS.txt
+          cat dist/SHA256SUMS.txt.sig
 
       - name: Publish the release
         env:

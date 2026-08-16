@@ -29,6 +29,8 @@ state history, and a rebuilt authentication layer.
   years, with timelines, usage heatmaps and a wake log. Administrator only.
 - **Remote access** — behind Cloudflare Access, each person sees only the
   computers shared with their email address.
+- **Updates** — checks GitHub daily, installs on your say-so, and updates the
+  agents through the server. Signed releases; no computer restarts.
 - **Windows tray app** — no console window, optional start with Windows.
 - Dark, responsive interface; drag to reorder; works on a phone.
 
@@ -125,27 +127,8 @@ then appears on that computer's card.
 
 Other commands: `wol-agent status` prints what the machine reports about
 itself, `wol-agent sleep` suspends it there and then without involving the
-server, and `wol-agent uninstall` removes the service and forgets the token.
-
-### Updating the agent
-
-The service locks the executable while it runs, so replace it in three steps,
-from an **administrator** Command Prompt in the folder holding the agent:
-
-```
-wol-agent.exe stop
-copy /y ...\wol-agent.exe wol-agent.exe
-wol-agent.exe start
-```
-
-The pairing lives in `wol-agent.json` beside the executable and is not touched,
-so no new code is needed. `wol-agent.exe restart` does the last two steps if
-the file is already in place, and the panel shows each agent's version so you
-can see which machines are still behind.
-
-On an agent older than 1.1.1 use `sc stop WoLGoAgent` and `sc start WoLGoAgent`
-instead, and expect the stop to take up to a minute: those builds only noticed
-the request between polls.
+server, `wol-agent update` installs the newest signed agent from the server,
+and `wol-agent uninstall` removes the service and forgets the token.
 
 ### Use the local address
 
@@ -185,6 +168,70 @@ sleep. Tokens are per-machine, stored hashed on the server, and revocable from
 the same dialog. A sleep command that a machine misses expires after ninety
 seconds, so waking a computer never makes it drop straight back to sleep.
 
+## Updates
+
+The **Updates** button in the toolbar shows what is available and installs it.
+Checking happens by itself, once a day; nothing else does. Downloading a
+release and installing it are separate buttons, and both are yours to press.
+
+The order matters and the panel follows it:
+
+1. **Fetch the release.** The server downloads it once and checks its signature.
+2. **Update this server.** It stops and starts again, a few seconds.
+3. **Update the sleep agents.** One button per computer, or all at once.
+
+**No computer is ever restarted, and nobody is signed out.** A running program
+cannot be overwritten on Windows, which is where the reboot in most updaters
+comes from — they give up and schedule the replacement for the next start.
+Renaming a running executable *is* allowed, so the new build is put in place
+with two renames and only the program itself restarts: the WoL-go service here,
+and on each PC the small agent service. That takes seconds, works at the lock
+screen, and shows nothing on screen.
+
+No elevation prompt appears on the agent machines either, and not because one
+is being suppressed: the agent already runs as LOCAL SYSTEM, so it can replace
+its own file and restart its own service without asking anyone.
+
+If a new build will not start, the previous one is put back automatically. A
+downloaded binary is also run once, with `-version`, before anything is moved —
+so a truncated download or the wrong architecture fails while the working
+version is still in place.
+
+### Signed releases
+
+Agents fetch their new build **from your server**, not from GitHub, so the
+computers being woken need no route to the internet and GitHub sees one request
+a day rather than one per machine.
+
+That convenience is not trust. Every release is signed with an Ed25519 key, and
+each agent verifies the signature itself against a public key compiled into it.
+A server that has been tampered with can offer an old release; it cannot make an
+agent run anything else. This is what keeps the earlier promise intact — that a
+stolen agent token cannot become a shell on that computer — now that an
+"upgrade" command exists at all.
+
+Releases built without the signing secret still install by hand, but no agent
+will update itself from one.
+
+**For a fork:** change `updateRepo` in `updates.go` and the public key in
+`internal/release/release.go` together, generate your own key pair, and put the
+private half in the repository's Actions secrets as `WOLGO_SIGNING_KEY`.
+
+### The first one is manual
+
+Versions before this one have no update mechanism to use, so upgrade the server
+by hand once — stop it, replace the executable, start it. After that the panel
+can do it. Agents older than this release likewise need one manual replacement:
+
+```
+wol-agent.exe stop
+copy /y ...\wol-agent.exe wol-agent.exe
+wol-agent.exe start
+```
+
+The pairing lives in `wol-agent.json` beside the executable and is never
+touched, so no new pairing code is needed.
+
 ## Who can see what
 
 | | Sees |
@@ -222,6 +269,7 @@ the tunnel.
 | `-cf-trust` | *(unset)* | Addresses whose Cloudflare headers are trusted; also settable in the UI |
 | `-no-tray` | `false` | Run without the Windows tray icon |
 | `-debug` | `false` | Verbose request logging |
+| `-version` | | Print the version and exit |
 
 ## Building
 
@@ -231,6 +279,11 @@ Pure Go — no cgo, no C compiler, and cross-compilation works out of the box.
 go build -o WoL-go .                                          # console build
 go build -o WoL-go-tray.exe -ldflags "-H windowsgui" .        # Windows tray build
 ```
+
+A plain build calls itself `dev`, which compares as older than any release, so
+it is always offered the update rather than being told it is ahead. The release
+workflow stamps the tag in with `-ldflags "-X main.appVersion=$VERSION"` (and
+`-X main.version=$VERSION` for the agent).
 
 Regenerating the embedded assets is only needed if you change them:
 

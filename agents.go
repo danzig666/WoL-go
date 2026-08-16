@@ -25,9 +25,15 @@ import (
 // The vocabulary is deliberately tiny. Anything that could run a program on the
 // remote machine would turn this into a backdoor on every PC in the house,
 // protected by one bearer token.
+// The fourth word, upgrade, is the only one that changes what the agent is,
+// and it is safe for a reason that has nothing to do with trusting this server:
+// the agent installs the binary only if it carries the release signature.
+// "Upgrade" therefore means "fetch a build signed by the release key", not
+// "run whatever the server sends".
 const (
 	commandSleep      = "sleep"
 	commandSleepForce = "sleep-force"
+	commandUpgrade    = "upgrade"
 )
 
 // enrolmentValidFor bounds how long a pairing code can be used.
@@ -272,8 +278,13 @@ func listAgents(c *gin.Context) {
 	c.JSON(http.StatusOK, agents)
 }
 
+// parseID reads a numeric path parameter.
+func parseID(value string) (int64, error) {
+	return strconv.ParseInt(value, 10, 64)
+}
+
 func deleteAgent(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	id, err := parseID(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown agent"})
 		return

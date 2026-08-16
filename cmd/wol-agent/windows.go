@@ -154,12 +154,34 @@ func powerRequests() string {
 	return strings.Join(holders, "; ")
 }
 
-// runHidden runs a console tool without flashing a window, which matters
-// because the service and any GUI build have no console of their own.
-func runHidden(name string, args ...string) (string, error) {
+// CREATE_NO_WINDOW, DETACHED_PROCESS and CREATE_NEW_PROCESS_GROUP.
+const (
+	createNoWindow        = 0x08000000
+	detachedProcess       = 0x00000008
+	createNewProcessGroup = 0x00000200
+)
+
+// hiddenCommand builds a command that does not flash a console window, which
+// matters because the service has no console of its own and Windows would
+// create one for every child.
+func hiddenCommand(name string, args ...string) *exec.Cmd {
 	cmd := exec.Command(name, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-	out, err := cmd.Output()
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+	return cmd
+}
+
+// applyDetached makes a child outlive this process, so it can still be running
+// when the service it is restarting has stopped.
+func applyDetached(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: detachedProcess | createNewProcessGroup,
+	}
+}
+
+// runHidden runs a console tool and returns its output.
+func runHidden(name string, args ...string) (string, error) {
+	out, err := hiddenCommand(name, args...).Output()
 	return string(out), err
 }
 
@@ -256,6 +278,44 @@ func startService() error {
 		return nil
 	}
 	return service.Start()
+}
+
+// serviceInstalled reports whether there is a service to restart at all. An
+// agent started by hand with "wol-agent run" has none, and an update on such a
+// machine should leave the new executable in place rather than deciding the
+// update failed because there was nothing to start.
+func serviceInstalled() bool {
+	manager, err := mgr.Connect()
+	if err != nil {
+		return false
+	}
+	defer manager.Disconnect()
+
+	service, err := manager.OpenService(serviceName)
+	if err != nil {
+		return false
+	}
+	service.Close()
+	return true
+}
+
+// serviceRunning reports whether the service is up, which is how an update
+// tells a successful restart from a binary that starts and immediately dies.
+func serviceRunning() bool {
+	manager, err := mgr.Connect()
+	if err != nil {
+		return false
+	}
+	defer manager.Disconnect()
+
+	service, err := manager.OpenService(serviceName)
+	if err != nil {
+		return false
+	}
+	defer service.Close()
+
+	status, err := service.Query()
+	return err == nil && status.State == svc.Running
 }
 
 func uninstallService() error {

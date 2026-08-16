@@ -6,6 +6,7 @@ import (
 	"embed"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -22,6 +23,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/natefinch/lumberjack.v2"
 	_ "modernc.org/sqlite"
+
+	"WoL-go/internal/binswap"
 )
 
 var db *sql.DB
@@ -50,11 +53,30 @@ var cfTrustFromFlag bool
 var listenHost, listenPort string
 
 func main() {
+	// Two things happen before anything else is set up, because both have to
+	// work in a copy of the program that is not the installed one.
+	//
+	// "finish-update" is the detached helper that restarts the service after
+	// its executable has been replaced; "-version" is what the update mechanism
+	// runs to prove a freshly downloaded binary is what it claims to be, and
+	// must not touch the database the running server has open.
+	if len(os.Args) > 1 && os.Args[1] == "finish-update" {
+		runFinishUpdate(os.Args[2:])
+		return
+	}
+	for _, arg := range os.Args[1:] {
+		if arg == "-version" || arg == "--version" {
+			fmt.Println(appVersion)
+			return
+		}
+	}
+
 	host := flag.String("h", "0.0.0.0", "Host to bind to")
 	port := flag.String("p", "9543", "Port to bind to")
 	debug := flag.Bool("debug", false, "Enable gin debug mode and verbose request logging")
 	publicWake := flag.Bool("public-wake", true, "Allow waking computers without signing in (use -public-wake=false to require a password)")
 	flag.BoolVar(&noTray, "no-tray", false, "Do not show the notification-area (system tray) icon on Windows")
+	flag.Bool("version", false, "Print the version and exit")
 	cfTrust := flag.String("cf-trust", "", "Source addresses whose Cloudflare Access headers are trusted, e.g. \"localhost\" or \"127.0.0.1,192.168.0.50\". Empty disables Cloudflare identities.")
 	flag.Parse()
 
@@ -82,7 +104,16 @@ func main() {
 	// stops at the first error - which would silently lose the log file too.
 	log.SetOutput(io.MultiWriter(quietWriter{os.Stdout}, logFile))
 
-	log.Printf("Starting Wake-on-LAN service")
+	log.Printf("Starting Wake-on-LAN service %s", appVersion)
+
+	// If a previous update was interrupted between the two renames, this puts
+	// the executable back before anything depends on it being there.
+	if exe, err := serverExecutable(); err == nil {
+		if err := binswap.Recover(exe); err != nil {
+			log.Printf("Could not recover the previous executable: %v", err)
+		}
+		binswap.Cleanup(exe)
+	}
 
 	db = initDB()
 	defer db.Close()
@@ -173,6 +204,16 @@ func main() {
 		api.GET("/cf-settings", cfSettings)
 		api.PUT("/cf-settings", updateCFSettings)
 
+		// Updates. Checking happens on its own; downloading a release and
+		// installing it are both deliberate acts of the administrator.
+		api.GET("/updates", updateStatus)
+		api.PUT("/updates/settings", updateSettings)
+		api.POST("/updates/check", checkUpdatesNow)
+		api.POST("/updates/download", beginDownload)
+		api.POST("/updates/agents", upgradeAllAgents)
+		api.POST("/updates/agents/:id", upgradeAgent)
+		api.POST("/updates/server", applyServerUpgrade)
+
 		// Managing who may reach which computer from the internet.
 		api.GET("/users", listCFUsers)
 		api.POST("/users", createCFUser)
@@ -188,6 +229,13 @@ func main() {
 		agent.POST("/heartbeat", agentHeartbeat)
 		agent.GET("/commands", agentCommands)
 		agent.POST("/result", agentResult)
+
+		// The mirror: agents fetch their new build from here rather than from
+		// GitHub, so they need no route to the internet. They verify the
+		// signature themselves, so this being convenient does not make it
+		// trusted.
+		agent.GET("/update", agentUpdateManifest)
+		agent.GET("/update/download", agentUpdateDownload)
 	}
 
 	// Sleeping is offered to the same visitors who may wake, since it is the
@@ -203,6 +251,7 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{
 			"public_wake":       *publicWake,
 			"cloudflare_active": cfEnabled(),
+			"version":           appVersion,
 			// Lets the page report which build it is actually running, which
 			// settles "have I really deployed the new version?".
 			"build": buildStamp,
@@ -236,6 +285,26 @@ func main() {
 	}
 
 	startHistoryTracker()
+	startUpdateChecker()
+
+	// How an update stops this server: the same orderly shutdown as choosing
+	// Quit, so the database is closed properly, followed by handing the process
+	// over to the replacement that the helper is waiting to start.
+	var updateOnce sync.Once
+	shutdownForUpdate = func() {
+		updateOnce.Do(func() {
+			log.Printf("Stopping to complete the update")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := srv.Shutdown(ctx); err != nil {
+				log.Printf("Forced shutdown: %v", err)
+			}
+			if db != nil {
+				db.Close()
+			}
+			os.Exit(0)
+		})
+	}
 
 	browseURL := "http://" + displayAddress(*host, *port)
 

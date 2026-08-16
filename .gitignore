@@ -28,6 +28,11 @@
 /agent-out.log
 /agent-err.log
 
+# The release signing key. The public half is in internal/release; this is the
+# private half, and it must never be committed. Its home is the repository's
+# GitHub Actions secrets.
+/RELEASE-SIGNING-KEY.txt
+
 # Editor and OS noise
 .vscode/
 .idea/

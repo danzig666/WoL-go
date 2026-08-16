@@ -31,6 +31,7 @@
         <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-9M22 20H2"/></symbol>
         <symbol id="i-grip" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></symbol>
         <symbol id="i-people" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 5.3a3.2 3.2 0 0 1 0 5.4M17.5 14.2A5.5 5.5 0 0 1 20.5 19"/></symbol>
+        <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5"/><path d="M4 19h16"/></symbol>
         <symbol id="i-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18h10a3.5 3.5 0 0 0 .5-6.96A5.5 5.5 0 0 0 6.9 9.2 3.9 3.9 0 0 0 7 18z"/></symbol>
     </defs>
 </svg>
@@ -97,6 +98,10 @@
                 </span>
                 <button type="button" class="btn btn-ghost btn-icon manage-only" id="insightsButton" title="History and statistics" aria-label="History and statistics">
                     <svg class="icon"><use href="#i-chart"/></svg>
+                </button>
+                <button type="button" class="btn btn-ghost btn-icon manage-only has-badge" id="updatesButton" title="Updates" aria-label="Updates">
+                    <svg class="icon"><use href="#i-download"/></svg>
+                    <span class="badge-dot" id="updateBadge" hidden></span>
                 </button>
                 <button type="button" class="btn btn-ghost btn-icon manage-only" id="peopleButton" title="Who can reach this from the internet" aria-label="Who can reach this from the internet">
                     <svg class="icon"><use href="#i-people"/></svg>
@@ -424,6 +429,84 @@
                 <p>Nobody has connected through Cloudflare yet.</p>
                 <p class="hint">Addresses appear here automatically the first time someone signs in.</p>
             </div>
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn btn-primary modal-close">Done</button>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Updates ============ -->
+<div class="modal-backdrop" id="updatesModal" role="dialog" aria-modal="true" aria-labelledby="updatesModalTitle">
+    <div class="modal modal-lg">
+        <div class="modal-head">
+            <h2 id="updatesModalTitle">Updates</h2>
+            <button type="button" class="btn btn-ghost btn-icon modal-close" aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button>
+        </div>
+        <div class="modal-body">
+
+            <div class="update-summary" id="updateSummary">
+                <div class="update-versions">
+                    <div>
+                        <span class="field-label">This server</span>
+                        <strong id="updateCurrent">-</strong>
+                    </div>
+                    <div>
+                        <span class="field-label">Newest release</span>
+                        <strong id="updateLatest">-</strong>
+                    </div>
+                </div>
+                <div class="update-summary-actions">
+                    <button type="button" class="btn btn-ghost" id="updateCheckButton">
+                        <svg class="icon"><use href="#i-refresh"/></svg><span>Check now</span>
+                    </button>
+                </div>
+            </div>
+
+            <p class="update-state" id="updateState"></p>
+            <p class="form-error" id="updateError" role="alert"></p>
+
+            <div class="update-step" id="updateDownloadStep">
+                <div>
+                    <strong>1. Fetch the release</strong>
+                    <p class="hint" id="updateDownloadHint">Downloaded here once, checked against its signature, and then handed to the agents. The computers running an agent never contact GitHub themselves.</p>
+                </div>
+                <button type="button" class="btn btn-primary" id="updateDownloadButton">
+                    <svg class="icon"><use href="#i-download"/></svg><span>Download</span>
+                </button>
+            </div>
+
+            <div class="update-step" id="updateServerStep">
+                <div>
+                    <strong>2. Update this server</strong>
+                    <p class="hint" id="updateServerHint">The service restarts and the page reconnects on its own.</p>
+                </div>
+                <button type="button" class="btn btn-secondary" id="updateServerButton" disabled>Update server</button>
+            </div>
+
+            <div class="update-step" id="updateAgentsStep">
+                <div>
+                    <strong>3. Update the sleep agents</strong>
+                    <p class="hint">Each computer restarts only the small agent service. Nobody is signed out and no computer restarts.</p>
+                </div>
+                <button type="button" class="btn btn-secondary" id="updateAllAgentsButton" disabled>Update all</button>
+            </div>
+
+            <div class="agent-update-list" id="agentUpdateList"></div>
+
+            <details class="cf-setup">
+                <summary>Release notes and settings</summary>
+                <div class="cf-setup-body">
+                    <label class="check-row">
+                        <input type="checkbox" id="updateCheckEnabled">
+                        <span>Check for updates automatically, once a day</span>
+                    </label>
+                    <p class="hint">Only checking is automatic. Downloading a release and installing it are always yours to press.</p>
+                    <p class="hint" id="updateCheckedAt"></p>
+                    <div class="release-notes" id="updateNotes"></div>
+                    <p class="hint"><a id="updateLink" href="#" target="_blank" rel="noopener noreferrer">View the release on GitHub</a></p>
+                </div>
+            </details>
         </div>
         <div class="modal-foot">
             <button type="button" class="btn btn-primary modal-close">Done</button>
