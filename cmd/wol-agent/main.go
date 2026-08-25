@@ -123,7 +123,9 @@ func main() {
 		if err := binswap.Recover(exe); err != nil {
 			log.Printf("could not recover the previous executable: %v", err)
 		}
-		binswap.Cleanup(exe)
+		// Only a backup old enough that no update could still be running: a
+		// start seconds into one may be the new version being watched.
+		binswap.CleanupStale(exe, time.Hour)
 	}
 
 	switch os.Args[1] {

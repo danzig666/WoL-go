@@ -88,6 +88,16 @@ func Swap(target string) (backup string, err error) {
 		return "", err
 	}
 
+	// Stamp the backup with the time of the swap rather than the time the old
+	// binary was built. A rename keeps the original timestamp, and how recent
+	// the backup is decides whether an update might still be in progress.
+	now := time.Now()
+	if err := os.Chtimes(backup, now, now); err != nil {
+		// Not fatal: it only makes the backup look older than it is, so it
+		// would be tidied away sooner than intended.
+		_ = err
+	}
+
 	if err := retry("moving the new executable into place", func() error {
 		return os.Rename(staged, target)
 	}); err != nil {
@@ -139,6 +149,30 @@ func Recover(target string) error {
 // Cleanup removes the backup left by a successful update, once the process
 // holding it has gone. It is deliberately quiet: failing to delete it is
 // harmless, and it will be cleared on the next update anyway.
+//
+// Only call this having seen the new version work. It is the undo, and
+// deleting it early is how a safety net comes to be missing at the moment it
+// is needed.
 func Cleanup(target string) {
 	_ = os.Remove(backupPath(target))
+}
+
+// CleanupStale removes a backup old enough that no update could still be
+// running, and leaves a recent one alone.
+//
+// This is what a program calls about itself at startup, and the distinction
+// matters: a newly started program may be the *new* version, seconds into an
+// update whose outcome is not yet known. Deleting the backup there would
+// destroy the only copy of the version that was working - which is exactly
+// what the watching helper would need if this one failed a moment later.
+func CleanupStale(target string, olderThan time.Duration) {
+	backup := backupPath(target)
+	info, err := os.Stat(backup)
+	if err != nil {
+		return
+	}
+	if time.Since(info.ModTime()) < olderThan {
+		return
+	}
+	_ = os.Remove(backup)
 }
