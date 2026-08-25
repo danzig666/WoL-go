@@ -119,6 +119,10 @@ func applyServerUpgrade(c *gin.Context) {
 		return
 	}
 
+	updates.Lock()
+	updates.serverError = ""
+	updates.Unlock()
+
 	if err := stageServerBinary(version); err != nil {
 		log.Printf("Server update refused: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -135,7 +139,14 @@ func applyServerUpgrade(c *gin.Context) {
 	go func() {
 		time.Sleep(time.Second)
 		if err := handOverToNewServer(version); err != nil {
+			// This process is still running, so the reason can be told to
+			// whoever pressed the button. Without this the page waits, finds
+			// the server answering, and reports a successful restart onto the
+			// version it was already running - which says nothing at all.
 			log.Printf("Server update failed: %v", err)
+			updates.Lock()
+			updates.serverError = err.Error()
+			updates.Unlock()
 		}
 	}()
 }

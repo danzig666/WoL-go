@@ -2095,7 +2095,7 @@ $('updateServerButton').addEventListener('click', async (event) => {
     try {
         const result = await api('/api/updates/server', { method: 'POST' });
         toast(result.message, 'success');
-        waitForServerToComeBack();
+        waitForServerToComeBack(result.applying);
     } catch (err) {
         toast(err.message, 'error');
         setLoading(button, false, 'Update server');
@@ -2104,27 +2104,66 @@ $('updateServerButton').addEventListener('click', async (event) => {
 
 // After the server restarts its address answers again, at which point the page
 // is reloaded so the new interface is the one on screen.
-function waitForServerToComeBack() {
+//
+// What it is running when it answers is the thing worth checking. A handover
+// that fails leaves the old server serving perfectly well, and simply reporting
+// that it came back would announce success for an update that did not happen.
+function waitForServerToComeBack(expected) {
     $('updateState').textContent = 'Restarting...';
     let attempts = 0;
+    let sawItGo = false;
+
     const timer = setInterval(async () => {
         attempts += 1;
+        let config = null;
         try {
-            const config = await api('/api/config');
-            if (config) {
-                clearInterval(timer);
-                $('updateState').textContent = 'Back up, running ' + (config.version || '') + '. Reloading.';
-                setTimeout(() => window.location.reload(), 800);
-            }
+            config = await api('/api/config');
         } catch (err) {
+            // It stopped answering, which is the restart happening.
+            sawItGo = true;
             if (attempts > 60) {
                 clearInterval(timer);
                 showError('updateError',
                     'The server has not come back after a minute. It may still be starting; '
                     + 'reload the page in a moment.');
             }
+            return;
         }
+
+        const running = config.version || '';
+        if (expected && running !== expected) {
+            // Still the old one. If it never went away, the handover failed
+            // before it started rather than during it - and either way there
+            // is no point waiting any longer.
+            if (sawItGo || attempts >= 8) {
+                clearInterval(timer);
+                reportFailedServerUpdate(running, expected);
+            }
+            return;
+        }
+
+        clearInterval(timer);
+        $('updateState').textContent = 'Back up, running ' + running + '. Reloading.';
+        setTimeout(() => window.location.reload(), 800);
     }, 1500);
+}
+
+// Says why, when the server can say why, rather than leaving the version
+// quietly unchanged and calling it a restart.
+async function reportFailedServerUpdate(running, expected) {
+    let reason = '';
+    try {
+        const status = await api('/api/updates');
+        reason = status.server_error || '';
+    } catch (err) {
+        /* Nothing more to add. */
+    }
+
+    $('updateState').textContent = 'Still running ' + running + '.';
+    showError('updateError',
+        'The update to ' + expected + ' did not take effect'
+        + (reason ? ': ' + reason : '. Look in wol.log beside the executable for the reason.'));
+    setLoading($('updateServerButton'), false, 'Update server');
 }
 
 $('updateCheckEnabled').addEventListener('change', async (event) => {

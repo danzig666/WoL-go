@@ -83,6 +83,10 @@ var updates = struct {
 	downloading   bool
 	downloadStep  string
 	downloadError string
+	// serverError records why the last attempt to replace this server failed.
+	// It is only ever set by a process that is still running, which is the
+	// whole point: a failed handover leaves someone to explain it.
+	serverError string
 }{}
 
 // --- Checking ---
@@ -499,6 +503,7 @@ func updateStatus(c *gin.Context) {
 	downloading := updates.downloading
 	step := updates.downloadStep
 	downloadError := updates.downloadError
+	serverError := updates.serverError
 	updates.Unlock()
 
 	downloaded := downloadedVersion()
@@ -518,6 +523,7 @@ func updateStatus(c *gin.Context) {
 		"downloading":      downloading,
 		"download_step":    step,
 		"download_error":   downloadError,
+		"server_error":     serverError,
 		"server_behind":    latest.Tag != "" && release.IsNewer(latest.Tag, appVersion),
 		"server_asset":     serverAssetName(),
 		"server_can_apply": downloaded != "" && serverUpgradeAvailable(downloaded),
