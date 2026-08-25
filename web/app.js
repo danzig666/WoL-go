@@ -2077,6 +2077,7 @@ $('updateAllAgentsButton').addEventListener('click', async (event) => {
         setTimeout(loadUpdates, 10000);
     } catch (err) {
         toast(err.message, 'error');
+        showError('updateError', err.message);
     } finally {
         setLoading(button, false, 'Update all');
     }
@@ -2097,7 +2098,11 @@ $('updateServerButton').addEventListener('click', async (event) => {
         toast(result.message, 'success');
         waitForServerToComeBack(result.applying);
     } catch (err) {
+        // Into the panel as well as a toast. A toast fades after a few seconds,
+        // and this is the message that explains why nothing happened - the one
+        // worth still being on screen when somebody looks again.
         toast(err.message, 'error');
+        showError('updateError', err.message);
         setLoading(button, false, 'Update server');
     }
 });
