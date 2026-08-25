@@ -2105,19 +2105,38 @@ $('updateAllAgentsButton').addEventListener('click', async (event) => {
 
 $('updateServerButton').addEventListener('click', async (event) => {
     const button = event.currentTarget; // before the dialog; see wakeAllButton
+    const expected = (updates.data && (updates.data.downloaded || updates.data.latest)) || '';
     const ok = await confirmDialog(
-        'Update this server to ' + updates.data.latest + '? It stops and starts again, '
+        'Update this server to ' + expected + '? It stops and starts again, '
         + 'which takes a few seconds. Waking and sleeping will not work during that time. '
         + 'If the new version will not start, the previous one is put back automatically.',
         'Update and restart');
     if (!ok) return;
 
     setLoading(button, true);
+    hideError('updateError');
     try {
         const result = await api('/api/updates/server', { method: 'POST' });
         toast(result.message, 'success');
-        waitForServerToComeBack(result.applying);
+        waitForServerToComeBack(result.applying || expected);
     } catch (err) {
+        // A lost answer is not the same as nothing having happened.
+        //
+        // Behind a tunnel or a reverse proxy, this request is the one most
+        // likely to lose its reply: the server answers and then deliberately
+        // stops, and the proxy - which now has no origin to talk to - reports
+        // a gateway error instead. Calling that a failure is how somebody ends
+        // up pressing the button repeatedly while the update it started is
+        // already running, which is far worse than waiting.
+        //
+        // 409 says so outright: an attempt is already under way.
+        const answerLost = !err.status || err.status === 502 || err.status === 503 || err.status === 504;
+        if (err.status === 409 || answerLost) {
+            waitForServerToComeBack(expected, err.status === 409
+                ? 'Already installing. Waiting for it to come back...'
+                : 'The answer did not come back. Checking whether it happened anyway...');
+            return;
+        }
         // Into the panel as well as a toast. A toast fades after a few seconds,
         // and this is the message that explains why nothing happened - the one
         // worth still being on screen when somebody looks again.
@@ -2133,8 +2152,11 @@ $('updateServerButton').addEventListener('click', async (event) => {
 // What it is running when it answers is the thing worth checking. A handover
 // that fails leaves the old server serving perfectly well, and simply reporting
 // that it came back would announce success for an update that did not happen.
-function waitForServerToComeBack(expected) {
-    $('updateState').textContent = 'Restarting...';
+function waitForServerToComeBack(expected, note) {
+    $('updateState').textContent = note || 'Restarting...';
+    // The button stays out of action until this resolves, so a second press
+    // cannot start a second update alongside the first.
+    $('updateServerButton').disabled = true;
     let attempts = 0;
     let sawItGo = false;
 

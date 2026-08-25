@@ -119,12 +119,31 @@ func applyServerUpgrade(c *gin.Context) {
 		return
 	}
 
+	// One at a time.
+	//
+	// Pressing the button twice used to start two of these, and they fight:
+	// both stage a binary over the same path and both rename the executable,
+	// so one can find the file already moved, or moved back, or missing for an
+	// instant. That is a bad enough race on its own, and behind a proxy it is
+	// the likely one - a lost answer looks exactly like nothing having
+	// happened, so the natural response is to press it again.
 	updates.Lock()
+	if inFlight := updates.applying; inFlight != "" && time.Since(time.Unix(updates.applyingAt, 0)) < applyingValidFor {
+		updates.Unlock()
+		c.JSON(http.StatusConflict, gin.H{
+			"error":    "Already installing " + inFlight + ". Wait for it to restart.",
+			"applying": inFlight,
+		})
+		return
+	}
+	updates.applying = version
+	updates.applyingAt = time.Now().Unix()
 	updates.serverError = ""
 	updates.Unlock()
 
 	if err := stageServerBinary(version); err != nil {
 		log.Printf("Server update refused: %v", err)
+		abandonUpgrade(err.Error())
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -137,18 +156,33 @@ func applyServerUpgrade(c *gin.Context) {
 	})
 
 	go func() {
-		time.Sleep(time.Second)
+		// Long enough for the answer to have reached the browser, which behind
+		// a tunnel means reaching the proxy and being forwarded on, not just
+		// being written to a socket here.
+		time.Sleep(2 * time.Second)
 		if err := handOverToNewServer(version); err != nil {
 			// This process is still running, so the reason can be told to
 			// whoever pressed the button. Without this the page waits, finds
 			// the server answering, and reports a successful restart onto the
 			// version it was already running - which says nothing at all.
 			log.Printf("Server update failed: %v", err)
-			updates.Lock()
-			updates.serverError = err.Error()
-			updates.Unlock()
+			abandonUpgrade(err.Error())
 		}
 	}()
+}
+
+// applyingValidFor bounds how long an attempt blocks another one. A handover
+// takes seconds; anything still marked as in progress after this did not get
+// far enough to replace the process, so a second attempt should be allowed
+// rather than the button being dead for ever.
+const applyingValidFor = 2 * time.Minute
+
+// abandonUpgrade records why this attempt stopped and lets another be made.
+func abandonUpgrade(reason string) {
+	updates.Lock()
+	updates.applying = ""
+	updates.serverError = reason
+	updates.Unlock()
 }
 
 // stageServerBinary puts the verified new build beside the current one and

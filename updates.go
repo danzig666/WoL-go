@@ -87,6 +87,10 @@ var updates = struct {
 	// It is only ever set by a process that is still running, which is the
 	// whole point: a failed handover leaves someone to explain it.
 	serverError string
+	// applying is the version currently being installed over this server, so a
+	// second attempt can be turned away rather than run alongside the first.
+	applying   string
+	applyingAt int64
 }{}
 
 // --- Checking ---
@@ -504,6 +508,7 @@ func updateStatus(c *gin.Context) {
 	step := updates.downloadStep
 	downloadError := updates.downloadError
 	serverError := updates.serverError
+	applying := updates.applying
 	updates.Unlock()
 
 	downloaded := downloadedVersion()
@@ -524,6 +529,7 @@ func updateStatus(c *gin.Context) {
 		"download_step":    step,
 		"download_error":   downloadError,
 		"server_error":     serverError,
+		"applying":         applying,
 		"server_behind":    latest.Tag != "" && release.IsNewer(latest.Tag, appVersion),
 		"server_asset":     serverAssetName(),
 		"server_can_apply": downloaded != "" && serverUpgradeAvailable(downloaded),

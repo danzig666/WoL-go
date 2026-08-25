@@ -204,6 +204,21 @@ downloaded binary is also run once, with `-version`, before anything is moved â€
 so a truncated download or the wrong architecture fails while the working
 version is still in place.
 
+### Updating through a tunnel
+
+Updating the server through a Cloudflare tunnel or any reverse proxy works, but
+the request that starts it is the one most likely to lose its reply: the server
+answers, then deliberately stops, and the proxy - which now has nothing to talk
+to - reports **502 Bad Gateway** instead of the answer.
+
+That is not a failure. The update is already running; only the reply was lost.
+The panel says so and waits for the server to come back rather than reporting
+an error, and a second attempt is refused while the first is still going, so
+pressing the button again cannot start two updates racing over the same file.
+
+If you would rather avoid the ambiguity entirely, run the update from the
+server's address on your own network instead of through the tunnel.
+
 ### Signed releases
 
 Agents fetch their new build **from your server**, not from GitHub, so the
