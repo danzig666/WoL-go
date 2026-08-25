@@ -40,6 +40,12 @@
     box-sizing: border-box;
 }
 
+/* Buttons set their own display, which would otherwise beat the browser's
+   rule for the hidden attribute and leave a "hidden" button on screen. */
+[hidden] {
+    display: none !important;
+}
+
 html {
     -webkit-text-size-adjust: 100%;
 }

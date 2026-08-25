@@ -427,16 +427,10 @@ function deviceCard(device) {
         notes.remove();
     }
 
-    // Sleeping needs the companion agent, so the button only appears where one
-    // is installed, and is disabled while that machine is not reporting in.
-    const sleepButton = card.querySelector('[data-action="sleep"]');
-    if (!device.can_sleep) {
-        sleepButton.remove();
-    } else if (!device.agent_online) {
-        sleepButton.disabled = true;
-        sleepButton.title = 'That computer is not reporting in at the moment';
-    }
-
+    // The Sleep button stays in the card and is hidden rather than removed, so
+    // that a later status refresh can bring it back without rebuilding the
+    // list - an agent that has just been paired, or a machine that has just
+    // woken up.
     applyStatus(card, device);
     return card;
 }
@@ -452,6 +446,8 @@ function applyStatus(card, device) {
     const dot = card.querySelector('.dot');
     const label = card.querySelector('.device-state');
     const status = state.statuses[device.id];
+
+    applySleepButton(card, device, status);
 
     dot.classList.remove('online', 'checking', 'asleep');
     label.classList.remove('online', 'asleep');
@@ -491,6 +487,52 @@ function applyStatus(card, device) {
         return;
     }
     label.textContent = device.last_woken ? 'No reply · woken ' + relativeTime(device.last_woken) : 'No reply';
+}
+
+// Sleeping needs the companion agent, so the button only appears where one is
+// installed and is disabled while that machine is not reporting in.
+//
+// This has to be applied on every status refresh rather than only when the card
+// is built. A computer that had just been put to sleep went on offering a Sleep
+// button until the whole list was reloaded, because the agent state arrived
+// only with the device list.
+function applySleepButton(card, device, status) {
+    const button = card.querySelector('[data-action="sleep"]');
+    if (!button) {
+        return;
+    }
+
+    // A check in flight says nothing about the agent, so the previous answer
+    // stands until a real one arrives.
+    const fresh = status && typeof status === 'object' && 'can_sleep' in status;
+    const canSleep = fresh ? status.can_sleep : device.can_sleep;
+    const agentOnline = fresh ? status.agent_online : device.agent_online;
+
+    // Kept on the record too, so a re-render without a status agrees with what
+    // is already on screen.
+    device.can_sleep = canSleep;
+    device.agent_online = agentOnline;
+
+    button.hidden = !canSleep;
+    button.disabled = !agentOnline;
+    button.title = agentOnline
+        ? 'Put this computer to sleep'
+        : 'That computer is not reporting in at the moment';
+}
+
+// markAgentGone applies what the server has already decided: an agent that has
+// just been told to sleep is treated as gone until it says otherwise.
+//
+// The cached status is updated as well as the record, because the status is
+// what applySleepButton believes when it has one - writing only the record
+// would be overruled by the previous poll's answer.
+function markAgentGone(device) {
+    device.agent_online = false;
+    const cached = state.statuses[device.id];
+    if (cached && typeof cached === 'object') {
+        cached.agent_online = false;
+    }
+    refreshCardStatus(device.id);
 }
 
 function refreshCardStatus(deviceId) {
@@ -609,18 +651,33 @@ async function sleepDevice(device, button) {
             // minute, or the command expires.
             toast(`Sleep sent to ${device.name}`, 'success');
         }
+        // The command has been accepted, so the button has nothing left to do:
+        // disable it now rather than at the next poll. The server has already
+        // marked the agent as gone, so the checks that follow agree - and put
+        // the button back within half a minute if the machine did not in fact
+        // go to sleep.
+        markAgentGone(device);
+
         // Watch it drop off, the mirror of the checks after a wake.
         scheduleWakeChecks();
     } catch (err) {
         toast(err.message, 'error');
     } finally {
+        // setLoading restores the button, which includes enabling it, so
+        // whether it should be enabled is decided again afterwards rather than
+        // before.
         setLoading(button, false);
+        refreshCardStatus(device.id);
     }
 }
 
 function scheduleWakeChecks() {
     state.wakeChecks.forEach(clearTimeout);
-    state.wakeChecks = [15000, 35000, 70000].map((delay) => setTimeout(refreshStatus, delay));
+    // The last two are past the agent's own two-minute timeout: a machine that
+    // went to sleep without saying so is only noticed once its heartbeat has
+    // lapsed, and every earlier check is too early to see it.
+    state.wakeChecks = [15000, 35000, 70000, 135000, 190000]
+        .map((delay) => setTimeout(refreshStatus, delay));
 }
 
 $('wakeAllButton').addEventListener('click', async (event) => {
