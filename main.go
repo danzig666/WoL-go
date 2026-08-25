@@ -286,6 +286,7 @@ func main() {
 
 	startHistoryTracker()
 	startUpdateChecker()
+	startAddressSweeper()
 
 	// How an update stops this server: the same orderly shutdown as choosing
 	// Quit, so the database is closed properly, followed by handing the process

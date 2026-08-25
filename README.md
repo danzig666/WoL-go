@@ -25,6 +25,9 @@ state history, and a rebuilt authentication layer.
 - **Manufacturer names** — the full IEEE registry (54,000 prefixes) is embedded,
   so unnamed hardware still shows as "Dell", "Sonos" or "Raspberry Pi".
 - **Live status** — on, asleep (still on the network, ready to wake), or no reply.
+- **Follows DHCP** — addresses are rechecked against the hardware address, so a
+  computer that is given a new one is still reported correctly, and one whose old
+  address now belongs to someone else is not mistaken for it.
 - **History** — every machine's state recorded each minute and kept for three
   years, with timelines, usage heatmaps and a wake log. Administrator only.
 - **Remote access** — behind Cloudflare Access, each person sees only the
@@ -124,6 +127,10 @@ then appears on that computer's card.
 - It also reports whether anything is **allowed to wake** that machine and
   whether **fast startup** is on, and the panel shows both — so you find out
   before you need it, rather than after.
+- It reports the machine's **current address** every thirty seconds, which is
+  how a new DHCP lease is noticed almost at once rather than at the next scan.
+- The Sleep button disables itself the moment the command is accepted, and
+  comes back on its own if the machine turns out not to have slept.
 
 Other commands: `wol-agent status` prints what the machine reports about
 itself, `wol-agent sleep` suspends it there and then without involving the

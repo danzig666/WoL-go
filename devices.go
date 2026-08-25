@@ -7,6 +7,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -524,6 +526,12 @@ type deviceStatus struct {
 	// card is still listening, and therefore one that can be woken.
 	Asleep bool   `json:"asleep"`
 	IP     string `json:"ip,omitempty"`
+	// CanSleep and AgentOnline travel with the status rather than only with
+	// the device list, so the Sleep button can be enabled and disabled while
+	// the page is open. Without them here, a computer that had just gone to
+	// sleep kept offering a Sleep button until the list was reloaded.
+	CanSleep    bool `json:"can_sleep"`
+	AgentOnline bool `json:"agent_online"`
 }
 
 // computeStatuses works out the state of every device.
@@ -534,40 +542,65 @@ type deviceStatus struct {
 // reported sleeping machines as switched on. Only a reply from a service -
 // which needs the operating system to be running - proves a machine is awake,
 // so the ARP entry is reported separately as "asleep" instead.
-func computeStatuses(devices []Device, includeIP bool) map[string]deviceStatus {
+//
+// adminView controls both whether addresses are echoed back and whether the
+// sleep permission is applied, which is the same distinction: everyone else
+// sees the reduced view.
+func computeStatuses(devices []Device, adminView bool) map[string]deviceStatus {
+	// Addresses are corrected before anything is probed. A saved address that
+	// DHCP has since given to another machine would otherwise be asked about
+	// the wrong computer, and answered.
+	arp := arpTable()
+	devices = reconcileAddresses(devices, arp)
+
 	results := make(map[string]deviceStatus, len(devices))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
 	for _, d := range devices {
 		key := strconv.FormatInt(d.ID, 10)
+		base := deviceStatus{CanSleep: d.CanSleep, AgentOnline: d.AgentOnline}
+		if !adminView {
+			base.CanSleep = d.CanSleep && d.SleepPublic
+		}
+		if adminView {
+			base.IP = d.IP
+		}
 		if d.IP == "" {
-			results[key] = deviceStatus{}
+			results[key] = base
 			continue
 		}
 		wg.Add(1)
-		go func(d Device, key string) {
+		go func(d Device, key string, status deviceStatus) {
 			defer wg.Done()
-			online := quickProbe(d.IP)
-			status := deviceStatus{Online: online}
-			if includeIP {
-				status.IP = d.IP
-			}
+			status.Online = quickProbe(d.IP)
 			mu.Lock()
 			results[key] = status
 			mu.Unlock()
-		}(d, key)
+		}(d, key, base)
 	}
 	wg.Wait()
 
-	arp := arpTable()
 	for _, d := range devices {
 		key := strconv.FormatInt(d.ID, 10)
 		status := results[key]
-		if !status.Online && d.IP != "" && arp[d.IP] == d.MAC {
+
+		switch holder, known := arp[d.IP]; {
+		case d.IP == "":
+			// Nothing to say.
+		case known && d.MAC != "" && holder != d.MAC:
+			// The address belongs to a different machine now, and this one was
+			// not found anywhere else on the network. Whatever answered the
+			// probe was not ours, so the reply is discarded rather than
+			// reported as this computer being on.
+			status.Online = false
+			status.Asleep = false
+			results[key] = status
+		case !status.Online && holder == d.MAC:
 			status.Asleep = true
 			results[key] = status
 		}
+
 		// Remember when the machine was last actually running, so the list
 		// can still say something useful once it is off again. Written at most
 		// once a minute per machine: every open page polls this endpoint, and
@@ -580,6 +613,87 @@ func computeStatuses(devices []Device, includeIP bool) map[string]deviceStatus {
 		}
 	}
 	return results
+}
+
+// reconcileAddresses corrects saved addresses from the ARP cache.
+//
+// A saved address is only ever as good as the DHCP lease that produced it, and
+// leases move. Nothing used to revisit one except a manual scan, so a computer
+// that changed address quietly stopped being reported correctly: probing its
+// old address either found nothing, or - worse - found whichever machine had
+// been given that address since, and reported a switched-off computer as
+// online.
+//
+// The cache is keyed by address, and here the MAC is what is known, so it is
+// read the other way round. This costs nothing: the reading is already taken
+// for the sleeping check, it is cached for a few seconds, and no packet is
+// sent. A sleeping machine still answers ARP, so it is found too.
+func reconcileAddresses(devices []Device, arp map[string]string) []Device {
+	if len(arp) == 0 {
+		return devices
+	}
+
+	// A hardware address can appear more than once: a stale entry for where a
+	// machine used to be can outlive the move. Collecting every candidate and
+	// keeping the saved address when it is still among them stops the record
+	// flapping between the two, and means a correction only happens when the
+	// saved address is definitely not this machine's any more.
+	ipsByMAC := make(map[string][]string, len(arp))
+	for ip, mac := range arp {
+		ipsByMAC[mac] = append(ipsByMAC[mac], ip)
+	}
+	for mac := range ipsByMAC {
+		sort.Slice(ipsByMAC[mac], func(i, j int) bool {
+			return ipLess(ipsByMAC[mac][i], ipsByMAC[mac][j])
+		})
+	}
+
+	for i := range devices {
+		d := &devices[i]
+		if d.MAC == "" {
+			continue
+		}
+		candidates := ipsByMAC[d.MAC]
+		if len(candidates) == 0 {
+			continue
+		}
+		if slices.Contains(candidates, d.IP) {
+			continue // where we thought it was, and still is
+		}
+
+		previous := d.IP
+		d.IP = candidates[0]
+		adoptAddress(d.ID, d.Name, d.IP, previous)
+	}
+	return devices
+}
+
+// adoptAddress records a new address for one computer.
+//
+// Any other record still claiming that address is stale by definition - the
+// hardware address in the cache says who is really there - so it is cleared
+// rather than left to be probed, which is what produced a confident answer
+// about the wrong machine in the first place.
+func adoptAddress(id int64, name, ip, previous string) {
+	if _, err := db.Exec("UPDATE devices SET ip = ? WHERE id = ?", ip, id); err != nil {
+		log.Printf("Could not record the new address for device %d: %v", id, err)
+		return
+	}
+	switch previous {
+	case "":
+		log.Printf("Found %q at %s", name, ip)
+	default:
+		log.Printf("%q moved from %s to %s", name, previous, ip)
+	}
+
+	result, err := db.Exec("UPDATE devices SET ip = '' WHERE ip = ? AND id <> ?", ip, id)
+	if err != nil {
+		log.Printf("Database error: %v", err)
+		return
+	}
+	if cleared, err := result.RowsAffected(); err == nil && cleared > 0 {
+		log.Printf("Cleared %s from %d other record(s): it belongs to %q now", ip, cleared, name)
+	}
 }
 
 // devicesStatus reports which machines are currently reachable. It is a

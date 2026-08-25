@@ -370,6 +370,19 @@ func sleepDevice(c *gin.Context) {
 	// cycle. If nothing is listening the command waits in the queue instead.
 	delivered := deliverCommand(agentID, command)
 
+	// Treat the agent as gone from this moment.
+	//
+	// A machine that is going to sleep cannot report that it did: the call that
+	// suspends it does not return until the computer wakes up again, so the
+	// news would arrive hours later and describe the wrong thing. Waiting for
+	// the heartbeat to lapse instead would leave a Sleep button offering to
+	// sleep an already sleeping computer for two minutes.
+	//
+	// So the expectation is recorded rather than waited for, and it corrects
+	// itself: if the machine did not actually sleep - something held it awake -
+	// the next heartbeat is along within thirty seconds and puts it back.
+	expireAgent(agentID)
+
 	device, _ := deviceByID(deviceID)
 	log.Printf("%s asked %q to sleep (force=%v, agent listening=%v)",
 		wakeActor(identity), device.Name, body.Force, delivered)
@@ -490,6 +503,93 @@ func adoptReportedMACs(deviceID int64, macs []string) {
 	log.Printf("Agent corrected the MAC for %q: %s -> %s", device.Name, device.MAC, chosen)
 }
 
+// expireAgent backdates an agent's last contact so it counts as offline until
+// it reports in again.
+func expireAgent(agentID int64) {
+	gone := time.Now().Add(-agentOfflineAfter - time.Second).Unix()
+	if _, err := db.Exec("UPDATE agents SET last_seen = ? WHERE id = ? AND last_seen > ?",
+		gone, agentID, gone); err != nil {
+		log.Printf("Database error: %v", err)
+	}
+}
+
+// reportedAdapter is one network adapter as the machine sees it.
+type reportedAdapter struct {
+	MAC string
+	IPs []string
+}
+
+// adoptReportedAddress records where the machine says it is.
+//
+// The adapter carrying the address this computer is woken by is the one that
+// matters, so the reported MAC is matched against the saved one rather than
+// simply taking the first address - a machine can easily have several, and the
+// wrong one would be no better than the stale address it replaced.
+func adoptReportedAddress(deviceID int64, adapters []reportedAdapter) {
+	device, err := deviceByID(deviceID)
+	if err != nil {
+		return
+	}
+
+	chosen := ""
+	for _, adapter := range adapters {
+		mac, err := normalizeMAC(adapter.MAC)
+		if err != nil || mac != device.MAC {
+			continue
+		}
+		chosen = preferKnownAddress(device.MAC, adapter.IPs)
+		break
+	}
+	// No adapter matches the saved MAC, which means the saved one is wrong.
+	// The agent orders wired adapters first, and that is the same one its
+	// reported MACs would correct the record to, so it is the right fallback.
+	if chosen == "" && len(adapters) > 0 {
+		chosen = preferKnownAddress(device.MAC, adapters[0].IPs)
+	}
+
+	if chosen == "" || chosen == device.IP {
+		return
+	}
+	adoptAddress(deviceID, device.Name, chosen, device.IP)
+}
+
+// preferKnownAddress chooses between the addresses a machine reports.
+//
+// A computer can hold more than one address on the same adapter, and if the
+// heartbeat picked one while the ARP cache resolved the other, the record would
+// be rewritten by each in turn - a flap every few seconds, and a line in the
+// log each time. Preferring an address both sources already agree on makes the
+// two settle instead of arguing.
+func preferKnownAddress(mac string, reported []string) string {
+	if mac != "" {
+		for ip, holder := range arpTable() {
+			if holder != mac {
+				continue
+			}
+			for _, candidate := range reported {
+				if strings.TrimSpace(candidate) == ip {
+					return ip
+				}
+			}
+		}
+	}
+	return firstIPv4(reported)
+}
+
+func firstIPv4(addresses []string) string {
+	for _, address := range addresses {
+		parsed := net.ParseIP(strings.TrimSpace(address))
+		if parsed == nil || parsed.To4() == nil {
+			continue
+		}
+		if parsed.IsLoopback() || parsed.IsLinkLocalUnicast() || parsed.IsUnspecified() {
+			continue
+		}
+		return parsed.String()
+	}
+	return ""
+}
+
 // authorizeAgent validates the agent's bearer token and notes it as seen.
 func authorizeAgent() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -527,6 +627,10 @@ func agentHeartbeat(c *gin.Context) {
 		FastStartup   *bool    `json:"fast_startup"`
 		PowerRequests string   `json:"power_requests"`
 		MACs          []string `json:"macs"`
+		Adapters      []struct {
+			MAC string   `json:"mac"`
+			IPs []string `json:"ips"`
+		} `json:"adapters"`
 	}
 	_ = c.ShouldBindJSON(&body)
 
@@ -543,6 +647,17 @@ func agentHeartbeat(c *gin.Context) {
 	// An agent reporting in is proof the machine is running, which is better
 	// evidence than any probe.
 	deviceID := c.GetInt64("agentDeviceID")
+
+	// The machine knows its own address better than anything else does, and
+	// says so every thirty seconds, so a lease that moves is noticed almost at
+	// once - no scanning, no guessing from a cache that may have aged out.
+	if len(body.Adapters) > 0 {
+		adopted := make([]reportedAdapter, 0, len(body.Adapters))
+		for _, a := range body.Adapters {
+			adopted = append(adopted, reportedAdapter{MAC: a.MAC, IPs: a.IPs})
+		}
+		adoptReportedAddress(deviceID, adopted)
+	}
 	if _, err := db.Exec("UPDATE devices SET last_seen = ? WHERE id = ?",
 		time.Now().Unix(), deviceID); err != nil {
 		log.Printf("Database error: %v", err)

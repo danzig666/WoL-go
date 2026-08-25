@@ -522,13 +522,24 @@ type machineFacts struct {
 	FastStartup   *bool    `json:"fast_startup"`
 	PowerRequests string   `json:"power_requests"`
 	MACs          []string `json:"macs"`
+	// Adapters carries the addresses as well, so the server can correct a
+	// record when DHCP moves this machine. It is sent every heartbeat, which
+	// is how a new lease is noticed in seconds rather than whenever somebody
+	// next runs a scan.
+	Adapters []adapterFacts `json:"adapters"`
 }
 
 func machineReport() machineFacts {
+	adapters := localAdapters()
+	macs := make([]string, 0, len(adapters))
+	for _, adapter := range adapters {
+		macs = append(macs, adapter.MAC)
+	}
 	r := machineFacts{
 		Hostname: hostname(),
 		Version:  version,
-		MACs:     localMACs(),
+		MACs:     macs,
+		Adapters: adapters,
 	}
 	if armed, ok := wakeArmed(); ok {
 		r.WakeArmed = &armed
@@ -544,6 +555,11 @@ func runStatus() {
 	r := machineReport()
 	fmt.Printf("hostname:       %s\n", r.Hostname)
 	fmt.Printf("MAC addresses:  %s\n", strings.Join(r.MACs, ", "))
+	for _, adapter := range r.Adapters {
+		if len(adapter.IPs) > 0 {
+			fmt.Printf("  %s at %s\n", adapter.MAC, strings.Join(adapter.IPs, ", "))
+		}
+	}
 	fmt.Printf("wake armed:     %s\n", describeBool(r.WakeArmed))
 	fmt.Printf("fast startup:   %s\n", describeBool(r.FastStartup))
 	if r.PowerRequests != "" {
@@ -574,16 +590,28 @@ func hostname() string {
 	return name
 }
 
-// localMACs lists this machine's hardware addresses, wired adapters first,
-// because Wake-on-LAN over a cable is what actually works.
-func localMACs() []string {
+// adapterFacts is one network adapter as this machine sees it: the hardware
+// address it would be woken by, and the addresses it currently answers on.
+//
+// Both together, rather than a bare list of addresses, because the server has
+// to know which address belongs to the adapter it wakes. A machine with a cable
+// and a wireless card has two, and choosing the wrong one is no better than the
+// stale address it was meant to replace.
+type adapterFacts struct {
+	MAC string   `json:"mac"`
+	IPs []string `json:"ips"`
+}
+
+// localAdapters lists this machine's adapters, wired first, because
+// Wake-on-LAN over a cable is what actually works.
+func localAdapters() []adapterFacts {
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		return nil
 	}
 
 	type candidate struct {
-		mac      string
+		adapter  adapterFacts
 		wireless bool
 		up       bool
 	}
@@ -596,8 +624,24 @@ func localMACs() []string {
 		if looksVirtualAdapter(iface.Name) {
 			continue
 		}
+
+		adapter := adapterFacts{MAC: strings.ToUpper(iface.HardwareAddr.String())}
+		addresses, err := iface.Addrs()
+		if err == nil {
+			for _, address := range addresses {
+				network, ok := address.(*net.IPNet)
+				if !ok || network.IP.To4() == nil {
+					continue
+				}
+				if network.IP.IsLoopback() || network.IP.IsLinkLocalUnicast() {
+					continue
+				}
+				adapter.IPs = append(adapter.IPs, network.IP.String())
+			}
+		}
+
 		found = append(found, candidate{
-			mac:      strings.ToUpper(iface.HardwareAddr.String()),
+			adapter:  adapter,
 			wireless: looksWireless(iface.Name),
 			up:       iface.Flags&net.FlagUp != 0,
 		})
@@ -610,9 +654,18 @@ func localMACs() []string {
 		return found[i].up && !found[j].up
 	})
 
-	var macs []string
+	adapters := make([]adapterFacts, 0, len(found))
 	for _, c := range found {
-		macs = append(macs, c.mac)
+		adapters = append(adapters, c.adapter)
+	}
+	return adapters
+}
+
+// localMACs is the hardware addresses alone, in the same order.
+func localMACs() []string {
+	var macs []string
+	for _, adapter := range localAdapters() {
+		macs = append(macs, adapter.MAC)
 	}
 	return macs
 }

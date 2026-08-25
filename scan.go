@@ -609,6 +609,146 @@ func arpTable() map[string]string {
 	return arpCached
 }
 
+// --- Keeping saved addresses current ---
+//
+// Reading the ARP cache costs nothing but only shows machines this host has
+// spoken to lately; entries age out in minutes. A computer that changed
+// address and has since been quiet is in nobody's cache, so it cannot be found
+// that way, however often it is looked for.
+//
+// The remedy is to make the network answer: sending a single datagram to every
+// address on the subnet forces the operating system to resolve each one at
+// layer 2, which is what fills the cache. A sleeping machine answers that,
+// because its network card is exactly what is still listening.
+//
+// This is deliberately far lighter than the discovery scan, which opens eight
+// TCP connections per host: one UDP packet per address, to the same port the
+// wake-up signal already uses, and no listening for a reply. It also only runs
+// when a computer is actually unaccounted for.
+
+const (
+	// addressSweepEvery is how often to consider sweeping. Leases last hours,
+	// so there is nothing to gain from looking more often than this.
+	addressSweepEvery = 10 * time.Minute
+
+	// sweepSettle is how long to wait for the replies to reach the cache. ARP
+	// on a local network resolves in milliseconds; this is generous.
+	sweepSettle = 2 * time.Second
+)
+
+// startAddressSweeper keeps saved addresses honest in the background.
+func startAddressSweeper() {
+	go func() {
+		// Late enough that startup, the first status poll and the update check
+		// are all out of the way.
+		time.Sleep(90 * time.Second)
+		for {
+			sweepAddressesIfNeeded()
+			time.Sleep(addressSweepEvery)
+		}
+	}()
+	log.Printf("Checking for computers that changed address every %s", addressSweepEvery)
+}
+
+// sweepAddressesIfNeeded looks for saved computers that are not in the ARP
+// cache anywhere, and goes looking for them if there are any.
+func sweepAddressesIfNeeded() {
+	devices, err := loadDevices()
+	if err != nil || len(devices) == 0 {
+		return
+	}
+
+	arp := arpTable()
+	present := make(map[string]bool, len(arp))
+	for _, mac := range arp {
+		present[mac] = true
+	}
+
+	var lost []string
+	for _, d := range devices {
+		if d.MAC == "" || present[d.MAC] {
+			continue
+		}
+		lost = append(lost, d.Name)
+	}
+	if len(lost) == 0 {
+		return
+	}
+
+	// Most of these are simply switched off, which is the ordinary case and
+	// not worth a line in the log every ten minutes. The sweep is cheap enough
+	// to run anyway, and only says anything if it finds something.
+	network := defaultNetwork()
+	if network == "" {
+		return
+	}
+	hosts, err := hostsInCIDR(network)
+	if err != nil {
+		return
+	}
+
+	nudgeAddresses(hosts)
+	time.Sleep(sweepSettle)
+
+	// Force a fresh reading rather than the cached one, which may predate the
+	// sweep entirely.
+	fresh := refreshARPTable()
+	found := 0
+	for _, mac := range fresh {
+		if !present[mac] {
+			found++
+		}
+	}
+	if found > 0 {
+		// reconcileAddresses does the matching and saves what it corrects.
+		reconcileAddresses(devices, fresh)
+	}
+}
+
+// nudgeAddresses sends one datagram to each address so the operating system
+// resolves it, filling the ARP cache. Nothing listens for an answer: the reply
+// wanted here is the ARP reply, which the network stack handles itself.
+func nudgeAddresses(hosts []string) {
+	const workers = 64
+	queue := make(chan string, len(hosts))
+	for _, host := range hosts {
+		queue <- host
+	}
+	close(queue)
+
+	mine := localIPs()
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for host := range queue {
+				if mine[host] {
+					continue
+				}
+				// Port 9 is discard, and is already where the wake-up signal
+				// goes, so this puts nothing new on the network.
+				conn, err := net.DialTimeout("udp", net.JoinHostPort(host, "9"), time.Second)
+				if err != nil {
+					continue
+				}
+				_, _ = conn.Write([]byte{0})
+				conn.Close()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// refreshARPTable reads the cache again, ignoring any recent reading.
+func refreshARPTable() map[string]string {
+	arpMu.Lock()
+	defer arpMu.Unlock()
+	arpCached = readARPTable()
+	arpCachedAt = time.Now()
+	return arpCached
+}
+
 // readARPTable parses the OS ARP cache. Parsing command output avoids needing
 // raw sockets, which would require administrator rights on Windows.
 func readARPTable() map[string]string {
