@@ -21,6 +21,17 @@ jobs:
         with:
           go-version: 'stable'
 
+      # The page is plain JavaScript with no build step, so nothing would
+      # otherwise notice a syntax error until a browser refused to run it -
+      # and a broken app.js is a blank interface, not a failed build.
+      - name: Check the page parses
+        run: |
+          set -eu
+          for file in web/*.js; do
+            node --check "$file"
+            echo "ok $file"
+          done
+
       # Pure Go, so every target cross-compiles from one runner with no C
       # toolchain. The Windows icon comes from the committed .syso resources,
       # which the linker picks up per architecture.

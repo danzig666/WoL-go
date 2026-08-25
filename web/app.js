@@ -172,6 +172,26 @@ function startSession(token, username) {
     checkUpdatesQuietly();
 }
 
+// A tab left open goes on running the JavaScript it was loaded with. After the
+// server updates itself that code is a version behind, which is confusing in a
+// specific way: buttons that were fixed are still broken, and nothing says so.
+const CHECK_PAGE_CURRENT_EVERY = 120000;
+
+async function checkPageIsCurrent() {
+    if (!state.build || state.staleNoticed) {
+        return;
+    }
+    try {
+        const config = await api('/api/config');
+        if (config.build && config.build !== state.build) {
+            state.staleNoticed = true;
+            toast('The server has been updated. Reload this page to catch up.', 'info');
+        }
+    } catch (err) {
+        /* Unreachable servers are the status poll's business, not this one's. */
+    }
+}
+
 function startStatusPolling() {
     if (!state.statusTimer) {
         state.statusTimer = setInterval(refreshStatus, 45000);
@@ -2240,6 +2260,10 @@ async function init() {
     try {
         const config = await api('/api/config');
         state.publicWake = !!config.public_wake;
+        // Remembered so the page can notice when the server has moved on
+        // underneath it - an open tab keeps running the code it was loaded
+        // with, however many times the server is updated.
+        state.build = config.build || '';
         if (config.build) {
             // Shown in the help dialog, so "am I running the new version?"
             // can be answered from the phone that is showing the problem.
@@ -2255,6 +2279,8 @@ async function init() {
     if (state.identity.kind === 'cloudflare') {
         state.publicWake = true;
     }
+
+    setInterval(checkPageIsCurrent, CHECK_PAGE_CURRENT_EVERY);
 
     if (state.token) {
         setSignedIn(true);
