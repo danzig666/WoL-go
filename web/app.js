@@ -212,6 +212,13 @@ function toast(message, kind = 'info') {
 }
 
 function setLoading(button, loading, label) {
+    // A spinner is decoration. If the button reference is somehow lost, the
+    // thing the user asked for should still happen rather than the handler
+    // throwing on the way to doing it - which is exactly how pressing "Wake
+    // all" and "Update server" came to do nothing at all.
+    if (!button) {
+        return;
+    }
     if (loading) {
         button.dataset.label = button.innerHTML;
         button.classList.add('loading');
@@ -681,6 +688,11 @@ function scheduleWakeChecks() {
 }
 
 $('wakeAllButton').addEventListener('click', async (event) => {
+    // Taken now, not after the dialog. currentTarget is only set while the
+    // event is being dispatched, and awaiting anything ends that - so reading
+    // it later gives null, and the handler dies before it sends anything.
+    const button = event.currentTarget;
+
     if (state.devices.length === 0) {
         toast('Add a computer first', 'error');
         return;
@@ -689,7 +701,6 @@ $('wakeAllButton').addEventListener('click', async (event) => {
     if (!ok) {
         return;
     }
-    const button = event.currentTarget;
     setLoading(button, true, 'Sending');
     try {
         const result = await api(endpoint('/devices/wake-all'), { method: 'POST' });
@@ -2049,6 +2060,7 @@ $('updateDownloadButton').addEventListener('click', async () => {
 });
 
 $('updateAllAgentsButton').addEventListener('click', async (event) => {
+    const button = event.currentTarget; // before the dialog; see wakeAllButton
     const behind = (updates.data.agents || []).filter((a) => a.behind && a.online);
     const ok = await confirmDialog(
         'Update the sleep agent on ' + behind.length + ' computer'
@@ -2058,7 +2070,6 @@ $('updateAllAgentsButton').addEventListener('click', async (event) => {
         'Update them');
     if (!ok) return;
 
-    const button = event.currentTarget;
     setLoading(button, true);
     try {
         const result = await api('/api/updates/agents', { method: 'POST' });
@@ -2072,6 +2083,7 @@ $('updateAllAgentsButton').addEventListener('click', async (event) => {
 });
 
 $('updateServerButton').addEventListener('click', async (event) => {
+    const button = event.currentTarget; // before the dialog; see wakeAllButton
     const ok = await confirmDialog(
         'Update this server to ' + updates.data.latest + '? It stops and starts again, '
         + 'which takes a few seconds. Waking and sleeping will not work during that time. '
@@ -2079,7 +2091,6 @@ $('updateServerButton').addEventListener('click', async (event) => {
         'Update and restart');
     if (!ok) return;
 
-    const button = event.currentTarget;
     setLoading(button, true);
     try {
         const result = await api('/api/updates/server', { method: 'POST' });
@@ -2117,12 +2128,14 @@ function waitForServerToComeBack() {
 }
 
 $('updateCheckEnabled').addEventListener('change', async (event) => {
-    const on = event.currentTarget.checked;
+    const box = event.currentTarget; // and not after the await, for the same reason
+    const on = box.checked;
     try {
         await api('/api/updates/settings', { method: 'PUT', body: { check: on } });
         toast(on ? 'Checking for updates daily.' : 'Automatic update checks are off.', 'success');
     } catch (err) {
-        event.currentTarget.checked = !on;
+        // Put the tick back where it was: the setting was not saved.
+        box.checked = !on;
         toast(err.message, 'error');
     }
 });
