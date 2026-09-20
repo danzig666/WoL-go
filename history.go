@@ -156,13 +156,17 @@ var historyRanges = map[string]time.Duration{
 	"all":   historyRetention,
 }
 
+func selectedHistoryRange(value string) time.Duration {
+	if span, ok := historyRanges[value]; ok {
+		return span
+	}
+	return historyRanges["day"]
+}
+
 // historyOverview returns, for every computer, its timeline over the chosen
 // range plus the numbers the dashboard tiles show.
 func historyOverview(c *gin.Context) {
-	span, ok := historyRanges[c.DefaultQuery("range", "day")]
-	if !ok {
-		span = 24 * time.Hour
-	}
+	span := selectedHistoryRange(c.DefaultQuery("range", "day"))
 	now := time.Now().Unix()
 	from := now - int64(span.Seconds())
 
@@ -258,9 +262,9 @@ func historyOverview(c *gin.Context) {
 	})
 }
 
-// deviceHeatmap buckets the last 90 days into hour-of-week cells, each holding
-// the fraction of that hour the machine was on. It shows the rhythm of a
-// machine - workday mornings, evening gaming, always-on - at a glance.
+// deviceHeatmap buckets the selected history range into hour-of-week cells,
+// each holding the fraction of the observed time that the machine was on. It
+// uses the same range selector as the timelines and summary above it.
 func deviceHeatmap(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -268,8 +272,11 @@ func deviceHeatmap(c *gin.Context) {
 		return
 	}
 
+	rangeKey := c.DefaultQuery("range", "day")
+	span := selectedHistoryRange(rangeKey)
 	now := time.Now()
-	from := now.Add(-90 * 24 * time.Hour).Unix()
+	to := now.Unix()
+	from := now.Add(-span).Unix()
 
 	rows, err := db.Query(
 		`SELECT state, started_at, ended_at FROM device_history
@@ -293,27 +300,25 @@ func deviceHeatmap(c *gin.Context) {
 		if start < from {
 			start = from
 		}
-		// Walk the interval hour by hour, attributing seconds to cells.
-		for t := start; t < end; {
-			moment := time.Unix(t, 0)
-			hourEnd := moment.Truncate(time.Hour).Add(time.Hour).Unix()
-			sliceEnd := hourEnd
-			if end < sliceEnd {
-				sliceEnd = end
-			}
-			onSeconds[int(moment.Weekday())][moment.Hour()] += float64(sliceEnd - t)
-			t = sliceEnd
+		if end > to {
+			end = to
 		}
+		addWeekHourSeconds(&onSeconds, start, end)
 	}
 
-	// How many times each hour-of-week occurred in the window bounds the
-	// fraction; 90 days is ~12-13 of each weekday.
-	weeks := 90.0 / 7.0
+	// The selected window may be shorter than a week and may begin or end in
+	// the middle of an hour, so calculate the actual observed seconds for every
+	// cell instead of assuming a fixed number of weeks.
+	var observedSeconds [7][24]float64
+	addWeekHourSeconds(&observedSeconds, from, to)
 	grid := make([][]float64, 7)
 	for day := 0; day < 7; day++ {
 		grid[day] = make([]float64, 24)
 		for hour := 0; hour < 24; hour++ {
-			fraction := onSeconds[day][hour] / (weeks * 3600)
+			fraction := 0.0
+			if observedSeconds[day][hour] > 0 {
+				fraction = onSeconds[day][hour] / observedSeconds[day][hour]
+			}
 			if fraction > 1 {
 				fraction = 1
 			}
@@ -321,7 +326,25 @@ func deviceHeatmap(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"days": grid})
+	c.JSON(http.StatusOK, gin.H{"days": grid, "from": from, "to": to, "range": rangeKey})
+}
+
+// addWeekHourSeconds splits an interval at local hour boundaries and adds its
+// duration to the corresponding weekday/hour cells.
+func addWeekHourSeconds(buckets *[7][24]float64, start, end int64) {
+	for current := start; current < end; {
+		moment := time.Unix(current, 0)
+		hourEnd := moment.Truncate(time.Hour).Add(time.Hour).Unix()
+		if hourEnd <= current {
+			hourEnd = current + int64(time.Hour.Seconds())
+		}
+		sliceEnd := hourEnd
+		if end < sliceEnd {
+			sliceEnd = end
+		}
+		buckets[int(moment.Weekday())][moment.Hour()] += float64(sliceEnd - current)
+		current = sliceEnd
+	}
 }
 
 // listWakeEvents returns the recent wake activity, newest first.

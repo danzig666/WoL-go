@@ -26,6 +26,15 @@ func withTestDB(t *testing.T) {
 	)`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := handle.Exec(`CREATE TABLE device_history (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		device_id INTEGER NOT NULL,
+		state TEXT NOT NULL,
+		started_at INTEGER NOT NULL,
+		ended_at INTEGER NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
 
 	db = handle
 	t.Cleanup(func() {
@@ -33,6 +42,30 @@ func withTestDB(t *testing.T) {
 		handle.Close()
 		db = previous
 	})
+}
+
+func TestCurrentOnlineSinceUsesTheOpenHistoryInterval(t *testing.T) {
+	withTestDB(t)
+	if _, err := db.Exec(
+		"INSERT INTO device_history (device_id, state, started_at, ended_at) VALUES (1, 'online', 100, 190)",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got := currentOnlineSince(1, 200); got != 100 {
+		t.Errorf("online since = %d, want interval start 100", got)
+	}
+}
+
+func TestCurrentOnlineSinceStartsNowAfterAnOfflineState(t *testing.T) {
+	withTestDB(t)
+	if _, err := db.Exec(
+		"INSERT INTO device_history (device_id, state, started_at, ended_at) VALUES (1, 'offline', 100, 190)",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got := currentOnlineSince(1, 200); got != 200 {
+		t.Errorf("online since = %d, want current observation 200", got)
+	}
 }
 
 func addTestDevice(t *testing.T, id int64, name, mac, ip string) Device {

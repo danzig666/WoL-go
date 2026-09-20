@@ -495,6 +495,7 @@ function applyStatus(card, device) {
 
     dot.classList.remove('online', 'checking', 'asleep');
     label.classList.remove('online', 'asleep');
+    label.removeAttribute('title');
 
     if (status === 'checking') {
         dot.classList.add('checking');
@@ -505,6 +506,10 @@ function applyStatus(card, device) {
         dot.classList.add('online');
         label.classList.add('online');
         label.textContent = 'Online';
+        const onlineSince = device.online_since || status.online_since;
+        if (onlineSince) {
+            label.title = 'Online since ' + exactDateTime(onlineSince);
+        }
         return;
     }
     // Nothing answered, but the machine still holds its address on the
@@ -513,24 +518,30 @@ function applyStatus(card, device) {
     if (status && status.asleep) {
         dot.classList.add('asleep');
         label.classList.add('asleep');
-        label.textContent = device.last_woken
-            ? 'Asleep · woken ' + relativeTime(device.last_woken)
-            : 'Asleep · ready to wake';
+        showLastSeen(label, device.last_seen);
         return;
     }
-    // Anonymous callers are not told the IP address, so the "add an IP"
-    // prompt would be meaningless to them.
-    if (!device.ip && state.signedIn) {
-        label.textContent = device.last_woken ? 'Woken ' + relativeTime(device.last_woken) : 'Add an IP to see if it is on';
+    showLastSeen(label, device.last_seen);
+}
+
+function showLastSeen(label, unixSeconds) {
+    if (!unixSeconds) {
+        label.textContent = 'Never seen';
         return;
     }
-    // Once a machine has been seen at least once, when that was is more
-    // useful than a bare "no reply".
-    if (device.last_seen) {
-        label.textContent = 'No reply · last seen ' + relativeTime(device.last_seen);
-        return;
-    }
-    label.textContent = device.last_woken ? 'No reply · woken ' + relativeTime(device.last_woken) : 'No reply';
+    label.textContent = 'Last seen ' + relativeTime(unixSeconds);
+    label.title = 'Last seen ' + exactDateTime(unixSeconds);
+}
+
+function exactDateTime(unixSeconds) {
+    return new Date(unixSeconds * 1000).toLocaleString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    });
 }
 
 // Sleeping needs the companion agent, so the button only appears where one is
@@ -606,6 +617,26 @@ async function refreshStatus() {
         state.statuses = {};
         return;
     }
+    state.devices.forEach((device) => {
+        const status = state.statuses[device.id];
+        if (!status || typeof status !== 'object') {
+            return;
+        }
+        if (status.last_seen) {
+            device.last_seen = status.last_seen;
+        }
+        if (status.online) {
+            // Keep the earliest observation made by this open page. Before
+            // the minute history sample records a transition, the server can
+            // only report the time of each individual successful probe.
+            if (status.online_since &&
+                (!device.online_since || status.online_since < device.online_since)) {
+                device.online_since = status.online_since;
+            }
+        } else {
+            device.online_since = 0;
+        }
+    });
     state.devices.forEach((d) => refreshCardStatus(d.id));
     updateStatusLine();
 }
@@ -1476,10 +1507,19 @@ async function selectHeatmapDevice(id, name) {
         row.classList.toggle('selected', row.dataset.id === String(id));
     });
     $('heatmapTitle').textContent = 'Usage pattern — ' + name;
+    const rangeLabels = {
+        day: '24 hours',
+        week: '7 days',
+        month: '30 days',
+        year: 'year',
+    };
+    $('heatmapHint').textContent = 'Usage during the selected ' +
+        (rangeLabels[insights.range] || 'period') +
+        '. Darker means more often on. Click another computer above to switch.';
 
     let data;
     try {
-        data = await api(`/api/history/${id}/heatmap`);
+        data = await api(`/api/history/${id}/heatmap?range=${encodeURIComponent(insights.range)}`);
     } catch (err) {
         return;
     }

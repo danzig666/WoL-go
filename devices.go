@@ -526,6 +526,11 @@ type deviceStatus struct {
 	// card is still listening, and therefore one that can be woken.
 	Asleep bool   `json:"asleep"`
 	IP     string `json:"ip,omitempty"`
+	// LastSeen keeps an open page current after a successful probe without
+	// making it reload the full device list.
+	LastSeen int64 `json:"last_seen"`
+	// OnlineSince is the beginning of the current observed online interval.
+	OnlineSince int64 `json:"online_since,omitempty"`
 	// CanSleep and AgentOnline travel with the status rather than only with
 	// the device list, so the Sleep button can be enabled and disabled while
 	// the page is open. Without them here, a computer that had just gone to
@@ -559,7 +564,7 @@ func computeStatuses(devices []Device, adminView bool) map[string]deviceStatus {
 
 	for _, d := range devices {
 		key := strconv.FormatInt(d.ID, 10)
-		base := deviceStatus{CanSleep: d.CanSleep, AgentOnline: d.AgentOnline}
+		base := deviceStatus{CanSleep: d.CanSleep, AgentOnline: d.AgentOnline, LastSeen: d.LastSeen}
 		if !adminView {
 			base.CanSleep = d.CanSleep && d.SleepPublic
 		}
@@ -606,13 +611,39 @@ func computeStatuses(devices []Device, adminView bool) map[string]deviceStatus {
 		// once a minute per machine: every open page polls this endpoint, and
 		// writing on each poll is needless contention.
 		now := time.Now().Unix()
-		if status.Online && now-d.LastSeen >= 60 {
-			if _, err := db.Exec("UPDATE devices SET last_seen = ? WHERE id = ?", now, d.ID); err != nil {
-				log.Printf("Could not record last seen for device %d: %v", d.ID, err)
+		if status.Online {
+			status.LastSeen = now
+			status.OnlineSince = currentOnlineSince(d.ID, now)
+			results[key] = status
+			if now-d.LastSeen >= 60 {
+				if _, err := db.Exec("UPDATE devices SET last_seen = ? WHERE id = ?", now, d.ID); err != nil {
+					log.Printf("Could not record last seen for device %d: %v", d.ID, err)
+				}
 			}
 		}
 	}
 	return results
+}
+
+// currentOnlineSince returns the beginning of the current observed online
+// interval. A recent open history interval survives page reloads; after a gap
+// in monitoring, the current probe becomes the new beginning rather than
+// claiming the computer stayed online while the app was not watching.
+func currentOnlineSince(deviceID, now int64) int64 {
+	var state string
+	var startedAt, endedAt int64
+	err := db.QueryRow(
+		`SELECT state, started_at, ended_at FROM device_history
+		 WHERE device_id = ? ORDER BY id DESC LIMIT 1`,
+		deviceID,
+	).Scan(&state, &startedAt, &endedAt)
+	if err == nil && state == "online" && now-endedAt <= int64(historyGapLimit.Seconds()) {
+		return startedAt
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		log.Printf("Could not read current state history for device %d: %v", deviceID, err)
+	}
+	return now
 }
 
 // reconcileAddresses corrects saved addresses from the ARP cache.
@@ -758,6 +789,7 @@ type PublicDevice struct {
 	Name      string `json:"name"`
 	Vendor    string `json:"vendor"`
 	LastWoken int64  `json:"last_woken"`
+	LastSeen  int64  `json:"last_seen"`
 	// CanSleep is true only where an agent is installed and the administrator
 	// has allowed others to sleep this particular computer.
 	CanSleep    bool `json:"can_sleep"`
@@ -779,6 +811,7 @@ func listPublicDevices(c *gin.Context) {
 			Name:        d.Name,
 			Vendor:      d.Vendor,
 			LastWoken:   d.LastWoken,
+			LastSeen:    d.LastSeen,
 			CanSleep:    d.CanSleep && d.SleepPublic,
 			AgentOnline: d.AgentOnline,
 		})
