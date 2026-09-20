@@ -16,6 +16,7 @@ import (
 type CFUser struct {
 	ID        int64   `json:"id"`
 	Email     string  `json:"email"`
+	IsAdmin   bool    `json:"is_admin"`
 	FirstSeen int64   `json:"first_seen"`
 	LastSeen  int64   `json:"last_seen"`
 	Note      string  `json:"note"`
@@ -80,9 +81,9 @@ func recordVisit(id int64, email string) {
 func cfUserByEmail(email string) (CFUser, error) {
 	var u CFUser
 	err := db.QueryRow(
-		"SELECT id, email, first_seen, last_seen, COALESCE(note, '') FROM cf_users WHERE email = ?",
+		"SELECT id, email, is_admin, first_seen, last_seen, COALESCE(note, '') FROM cf_users WHERE email = ?",
 		email,
-	).Scan(&u.ID, &u.Email, &u.FirstSeen, &u.LastSeen, &u.Note)
+	).Scan(&u.ID, &u.Email, &u.IsAdmin, &u.FirstSeen, &u.LastSeen, &u.Note)
 	if err != nil {
 		return CFUser{}, err
 	}
@@ -141,7 +142,7 @@ func devicesForUser(userID int64) ([]Device, error) {
 
 // visibleDevices is the list the caller is allowed to know about.
 func visibleDevices(id Identity) ([]Device, error) {
-	if id.isCloudflare() {
+	if id.isCloudflare() && !id.isAdmin() {
 		return devicesForUser(id.UserID)
 	}
 	return loadDevices()
@@ -164,7 +165,7 @@ func mayUseDevice(id Identity, deviceID int64) (bool, error) {
 // --- Administration ---
 
 func listCFUsers(c *gin.Context) {
-	rows, err := db.Query("SELECT id, email, first_seen, last_seen, COALESCE(note, '') FROM cf_users ORDER BY email")
+	rows, err := db.Query("SELECT id, email, is_admin, first_seen, last_seen, COALESCE(note, '') FROM cf_users ORDER BY email")
 	if err != nil {
 		log.Printf("Database error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not load the list of people"})
@@ -175,7 +176,7 @@ func listCFUsers(c *gin.Context) {
 	users := []CFUser{}
 	for rows.Next() {
 		var u CFUser
-		if err := rows.Scan(&u.ID, &u.Email, &u.FirstSeen, &u.LastSeen, &u.Note); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.IsAdmin, &u.FirstSeen, &u.LastSeen, &u.Note); err != nil {
 			log.Printf("Database error: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not load the list of people"})
 			return
@@ -255,6 +256,7 @@ func setCFUserDevices(c *gin.Context) {
 
 	var body struct {
 		DeviceIDs []int64 `json:"device_ids"`
+		IsAdmin   *bool   `json:"is_admin"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
@@ -285,6 +287,15 @@ func setCFUserDevices(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not save the changes"})
 		return
 	}
+	// A pointer distinguishes an older client that does not know about roles
+	// from one that explicitly unticks administrator access.
+	if body.IsAdmin != nil {
+		if _, err := tx.Exec("UPDATE cf_users SET is_admin = ? WHERE id = ?", *body.IsAdmin, id); err != nil {
+			log.Printf("Database error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not save the changes"})
+			return
+		}
+	}
 	for _, deviceID := range body.DeviceIDs {
 		// INSERT OR IGNORE also drops duplicates in the submitted list.
 		if _, err := tx.Exec(
@@ -307,8 +318,13 @@ func setCFUserDevices(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not save the changes"})
 		return
 	}
-	log.Printf("Access for %s now covers %d computer(s)", email, len(granted))
-	c.JSON(http.StatusOK, gin.H{"device_ids": granted})
+	user, err := cfUserByEmail(email)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not save the changes"})
+		return
+	}
+	log.Printf("Access for %s now covers %d computer(s); administrator: %t", email, len(granted), user.IsAdmin)
+	c.JSON(http.StatusOK, user)
 }
 
 func deleteCFUser(c *gin.Context) {
@@ -349,6 +365,7 @@ func whoAmI(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"kind":              id.Kind,
 		"email":             id.Email,
+		"is_admin":          id.isAdmin(),
 		"sees_everything":   id.seesEverything(),
 		"cloudflare_active": cfEnabled(),
 	})

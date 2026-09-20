@@ -260,6 +260,7 @@ touched, so no new pairing code is needed.
 | --- | --- |
 | **Administrator** (signed in) | Everything, plus all management |
 | **Local network** | Every computer, wake only — no MAC, IP or notes |
+| **Cloudflare administrator** | Everything, with no second password sign-in |
 | **Cloudflare visitor** | Only the computers shared with their email |
 
 Waking needs no password by default, so it works from a phone without hunting
@@ -270,6 +271,12 @@ for credentials. Run with `-public-wake=false` to require a sign-in for that too
 If you publish the service through a Cloudflare tunnel with Access in front, it
 can recognise each visitor by their authenticated email and show them only what
 you have shared.
+
+In **People**, tick **Administrator** for an address to give that person the
+full control panel whenever Cloudflare Access authenticates that email. They do
+not need to sign in again with the app's administrator password. The original
+password account remains available for local access and for assigning the first
+Cloudflare administrator.
 
 `Cf-Access-Authenticated-User-Email` is an ordinary HTTP header, so it is
 believed **only** from source addresses you nominate — otherwise anyone able to

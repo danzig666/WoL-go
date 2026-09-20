@@ -175,8 +175,9 @@ func main() {
 		log.Printf("Trusting Cloudflare Access headers from %s", strings.Join(cfTrustDescription(), ", "))
 	}
 
-	// Everything else needs a valid session.
-	api := router.Group("/api", authorizeJWT(false), adminIdentity())
+	// Everything else needs either a valid password session or a Cloudflare
+	// identity that has been assigned administrator access.
+	api := router.Group("/api", resolveIdentity(), authorizeAdmin(), adminIdentity())
 	{
 		api.GET("/devices", listDevices)
 		api.POST("/devices", createDevice)
@@ -490,6 +491,7 @@ func createTables(db *sql.DB) {
 		`CREATE TABLE IF NOT EXISTS cf_users (
             id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            is_admin INTEGER NOT NULL DEFAULT 0,
             first_seen INTEGER NOT NULL DEFAULT 0,
             last_seen INTEGER NOT NULL DEFAULT 0,
             note TEXT
@@ -559,6 +561,7 @@ func createTables(db *sql.DB) {
 	// Upgrade databases created before token revocation existed. SQLite has no
 	// "ADD COLUMN IF NOT EXISTS", so a duplicate-column error here is expected.
 	addColumnIfMissing(db, "users", "token_version INTEGER NOT NULL DEFAULT 0")
+	addColumnIfMissing(db, "cf_users", "is_admin INTEGER NOT NULL DEFAULT 0")
 
 	// Everything learned about a machine is kept with it, rather than being
 	// recomputed on every read or discarded after a scan.

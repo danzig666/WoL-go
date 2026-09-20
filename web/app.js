@@ -16,6 +16,7 @@ const state = {
     signedIn: false,
     publicWake: true,
     // Identity as reported by the server: "admin", "cloudflare" or "local".
+    // Cloudflare identities may also be assigned administrator access.
     identity: { kind: 'local', email: '' },
     people: [],
     devices: [],
@@ -105,8 +106,10 @@ function setSignedIn(signedIn) {
 function applyIdentity(identity) {
     state.identity = identity || { kind: 'local', email: '' };
     const isCloudflare = state.identity.kind === 'cloudflare';
+    const isCloudflareAdmin = isCloudflare && !!state.identity.is_admin;
 
     document.body.classList.toggle('cf-user', isCloudflare);
+    document.body.classList.toggle('cf-admin', isCloudflareAdmin);
     if (isCloudflare) {
         $('identityEmail').textContent = state.identity.email;
     }
@@ -1702,6 +1705,10 @@ function renderPeople() {
                 <span class="badge"></span>
             </div>
             <div class="person-body">
+                <label class="person-admin">
+                    <input type="checkbox" data-role="admin">
+                    <span><strong>Administrator</strong><small>Full control while authenticated through Cloudflare; no password sign-in required.</small></span>
+                </label>
                 <div class="person-devices"></div>
                 <div class="person-actions">
                     <button type="button" class="btn btn-ghost btn-danger-text" data-action="remove">Remove person</button>
@@ -1711,10 +1718,12 @@ function renderPeople() {
 
         row.querySelector('.person-email').textContent = person.email;
         row.querySelector('.person-sub').textContent = describePerson(person);
-        row.querySelector('.badge').textContent =
-            person.device_ids.length === 0
+        row.querySelector('.badge').textContent = person.is_admin
+            ? 'administrator'
+            : person.device_ids.length === 0
                 ? 'no access'
                 : `${person.device_ids.length} of ${state.devices.length}`;
+        row.querySelector('[data-role="admin"]').checked = !!person.is_admin;
 
         const list = row.querySelector('.person-devices');
         if (state.devices.length === 0) {
@@ -1741,12 +1750,13 @@ function renderPeople() {
         row.querySelector('[data-action="save"]').addEventListener('click', async (event) => {
             const ids = Array.from(list.querySelectorAll('input:checked'))
                 .map((box) => parseInt(box.dataset.deviceId, 10));
+            const isAdmin = row.querySelector('[data-role="admin"]').checked;
             const button = event.currentTarget;
             setLoading(button, true);
             try {
                 await api(`/api/users/${person.id}/devices`, {
                     method: 'PUT',
-                    body: { device_ids: ids },
+                    body: { device_ids: ids, is_admin: isAdmin },
                 });
                 toast(`Access updated for ${person.email}`, 'success');
                 await loadPeople();
@@ -2303,6 +2313,17 @@ async function init() {
     }
 
     setInterval(checkPageIsCurrent, CHECK_PAGE_CURRENT_EVERY);
+
+    // A promoted Cloudflare identity is already strongly authenticated by
+    // Access, so it can use the management API without a second login.
+    if (state.identity.kind === 'cloudflare' && state.identity.is_admin) {
+        setSignedIn(true);
+        showView('main');
+        loadDevices();
+        startStatusPolling();
+        checkUpdatesQuietly();
+        return;
+    }
 
     if (state.token) {
         setSignedIn(true);

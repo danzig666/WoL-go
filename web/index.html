@@ -112,10 +112,10 @@
                 <button type="button" class="btn btn-secondary anon-only" id="signInButton">
                     <svg class="icon"><use href="#i-key"/></svg><span>Sign in to manage</span>
                 </button>
-                <button type="button" class="btn btn-ghost btn-icon manage-only" id="passwordButton" title="Change password" aria-label="Change password">
+                <button type="button" class="btn btn-ghost btn-icon manage-only password-admin-only" id="passwordButton" title="Change password" aria-label="Change password">
                     <svg class="icon"><use href="#i-key"/></svg>
                 </button>
-                <button type="button" class="btn btn-ghost btn-icon manage-only" id="logoutButton" title="Sign out" aria-label="Sign out">
+                <button type="button" class="btn btn-ghost btn-icon manage-only password-admin-only" id="logoutButton" title="Sign out" aria-label="Sign out">
                     <svg class="icon"><use href="#i-logout"/></svg>
                 </button>
             </div>
@@ -381,6 +381,7 @@
         <div class="modal-body">
             <p class="lead" id="peopleIntro">
                 People who sign in through Cloudflare Access see only the computers you tick for them.
+                Assigning someone as an administrator gives them the full control panel without a second password sign-in.
                 Anyone on your own network still sees everything.
             </p>
 

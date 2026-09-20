@@ -223,19 +223,20 @@ func recentSightings() []cfSighting {
 // Identity is who is making a request.
 type Identity struct {
 	// Kind is "admin", "cloudflare" or "local".
-	Kind   string
-	Email  string
-	UserID int64 // cf_users.id, for Cloudflare identities
+	Kind    string
+	Email   string
+	UserID  int64 // cf_users.id, for Cloudflare identities
+	CFAdmin bool  // granted administrator access by an existing administrator
 }
 
-func (i Identity) isAdmin() bool      { return i.Kind == "admin" }
+func (i Identity) isAdmin() bool      { return i.Kind == "admin" || i.CFAdmin }
 func (i Identity) isCloudflare() bool { return i.Kind == "cloudflare" }
 
 // seesEverything reports whether this identity may list every saved computer.
 // Administrators and people on the local network may; a Cloudflare visitor is
 // limited to what has been shared with their address.
 func (i Identity) seesEverything() bool {
-	return !i.isCloudflare()
+	return i.isAdmin() || !i.isCloudflare()
 }
 
 const identityKey = "identity"
@@ -330,7 +331,7 @@ func resolveIdentity() gin.HandlerFunc {
 					log.Printf("Could not look up Cloudflare user %s: %v", email, err)
 					identity = Identity{Kind: "cloudflare", Email: email, UserID: 0}
 				} else {
-					identity = Identity{Kind: "cloudflare", Email: email, UserID: user.ID}
+					identity = Identity{Kind: "cloudflare", Email: email, UserID: user.ID, CFAdmin: user.IsAdmin}
 				}
 			}
 		}
@@ -338,6 +339,20 @@ func resolveIdentity() gin.HandlerFunc {
 		noteSighting(sighting)
 		c.Set(identityKey, identity)
 		c.Next()
+	}
+}
+
+// authorizeAdmin accepts either a password-authenticated administrator session
+// or a Cloudflare Access identity that an administrator has promoted. The
+// Cloudflare identity has already been restricted to trusted tunnel peers by
+// resolveIdentity.
+func authorizeAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if identityOf(c).isAdmin() {
+			c.Next()
+			return
+		}
+		authorizeJWT(false)(c)
 	}
 }
 
@@ -424,10 +439,16 @@ func setSetting(key, value string) error {
 	return err
 }
 
-// adminIdentity marks the request as coming from the signed-in administrator.
-// It runs after authorizeJWT, which has already validated the session.
+// adminIdentity marks password-authenticated requests as administrator calls,
+// while preserving the email on an already-authorized Cloudflare identity.
 func adminIdentity() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Keep the email identity for a Cloudflare administrator. For a password
+		// session, replace the visitor/local identity with the account name.
+		if identityOf(c).isAdmin() {
+			c.Next()
+			return
+		}
 		username, _ := c.Get("username")
 		name, _ := username.(string)
 		c.Set(identityKey, Identity{Kind: "admin", Email: name})

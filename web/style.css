@@ -111,6 +111,12 @@ body:not(.cf-user) .cf-only {
     display: none !important;
 }
 
+/* Cloudflare administrators are authenticated by Access, so password and
+   local-session controls do not apply to them. */
+body.cf-admin .password-admin-only {
+    display: none !important;
+}
+
 .identity-chip {
     display: inline-flex;
     align-items: center;
@@ -263,6 +269,40 @@ body:not(.cf-user) .cf-only {
     grid-template-columns: 1fr;
     gap: 4px;
     margin: 10px 0;
+}
+
+.person-admin {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    margin: 10px 0 4px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.person-admin:hover {
+    background: var(--surface-2);
+}
+
+.person-admin input {
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+    accent-color: var(--accent);
+    flex: none;
+}
+
+.person-admin span {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13.5px;
+}
+
+.person-admin small {
+    color: var(--text-faint);
 }
 
 @media (min-width: 560px) {
