@@ -10,12 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"WoL-go/internal/binswap"
+	"WoL-go/internal/platform"
 	"WoL-go/internal/release"
 )
 
@@ -126,7 +126,7 @@ func fetchManifest(cfg config) (upgradeManifest, error) {
 	var manifest upgradeManifest
 
 	req, err := http.NewRequest(http.MethodGet,
-		cfg.Server+"/api/agent/update?arch="+runtime.GOARCH, nil)
+		cfg.Server+"/api/agent/update?arch="+platform.NativeGOARCH(), nil)
 	if err != nil {
 		return manifest, err
 	}
@@ -147,14 +147,14 @@ func fetchManifest(cfg config) (upgradeManifest, error) {
 		return manifest, fmt.Errorf("%s", describeResponse(resp.StatusCode, data))
 	}
 	if manifest.Version == "" || manifest.Asset == "" {
-		return manifest, fmt.Errorf("the server offered no update for %s", runtime.GOARCH)
+		return manifest, fmt.Errorf("the server offered no update for %s", platform.NativeGOARCH())
 	}
 	// The asset name is used as a file name and as a key into the checksums, so
 	// it must be the name this build expects rather than anything the server
 	// felt like sending.
-	if manifest.Asset != release.AgentAsset(runtime.GOARCH) {
+	if manifest.Asset != release.AgentAsset(platform.NativeGOARCH()) {
 		return manifest, fmt.Errorf("the server offered %q, which is not the agent for %s",
-			manifest.Asset, runtime.GOARCH)
+			manifest.Asset, platform.NativeGOARCH())
 	}
 	return manifest, nil
 }
@@ -178,7 +178,7 @@ func verifyManifest(manifest upgradeManifest) (release.Checksums, error) {
 
 func download(cfg config, manifest upgradeManifest, to string) error {
 	req, err := http.NewRequest(http.MethodGet,
-		cfg.Server+"/api/agent/update/download?arch="+runtime.GOARCH, nil)
+		cfg.Server+"/api/agent/update/download?arch="+platform.NativeGOARCH(), nil)
 	if err != nil {
 		return err
 	}

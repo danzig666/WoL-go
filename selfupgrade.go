@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"WoL-go/internal/binswap"
+	"WoL-go/internal/platform"
 	"WoL-go/internal/release"
 )
 
@@ -53,14 +54,14 @@ func serverExecutable() (string, error) {
 	return exe, nil
 }
 
-// serverAssetName works out which release asset is this build.
+// serverAssetName works out which release asset this machine should run.
 //
 // On Windows the console and tray builds are the same program linked for
 // different subsystems, so the file name is the only thing that distinguishes
 // them - and it can be anything, because people rename downloads. The subsystem
 // recorded in this binary's own PE header is the fact that cannot be renamed.
 func serverAssetName() string {
-	base := fmt.Sprintf("WoL-go-%s-%s", runtime.GOOS, runtime.GOARCH)
+	base := fmt.Sprintf("WoL-go-%s-%s", runtime.GOOS, platform.NativeGOARCH())
 	if runtime.GOOS != "windows" {
 		return base
 	}
