@@ -274,7 +274,8 @@ func main() {
 
 	// Redirect root to the static HTML file
 	router.GET("/", func(c *gin.Context) {
-		c.Redirect(http.StatusFound, "/web/index.html")
+		c.Header("Cache-Control", "no-store")
+		c.Redirect(http.StatusFound, "/web/index.html?ui="+buildStamp)
 	})
 
 	address := net.JoinHostPort(*host, *port)
@@ -417,6 +418,12 @@ func securityHeaders() gin.HandlerFunc {
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Content-Security-Policy",
 			"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+		// API responses are live state, not static resources. This also keeps a
+		// reverse proxy from handing an old interface build number to a page that
+		// is deciding whether it needs to reload after an update.
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			h.Set("Cache-Control", "no-store")
+		}
 		c.Next()
 	}
 }

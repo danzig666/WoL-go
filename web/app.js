@@ -36,6 +36,10 @@ const $ = (id) => document.getElementById(id);
 
 async function api(path, options = {}) {
     const opts = Object.assign({}, options);
+    // API data is current state. Explicitly bypass browser caches as well as
+    // relying on the server's response header, especially for the build check
+    // that decides whether this page should replace itself after an update.
+    opts.cache = 'no-store';
     opts.headers = Object.assign({}, opts.headers);
     if (state.token) {
         opts.headers['Authorization'] = 'Bearer ' + state.token;
@@ -188,11 +192,21 @@ async function checkPageIsCurrent() {
         const config = await api('/api/config');
         if (config.build && config.build !== state.build) {
             state.staleNoticed = true;
-            toast('The server has been updated. Reload this page to catch up.', 'info');
+            toast('The server has been updated. Loading the new interface...', 'info');
+            setTimeout(() => reloadForBuild(config.build), 800);
         }
     } catch (err) {
         /* Unreachable servers are the status poll's business, not this one's. */
     }
+}
+
+// Moving to a build-specific document URL prevents a mobile browser from
+// satisfying the reload entirely from its memory cache. The new document then
+// references versioned JavaScript and CSS URLs as well.
+function reloadForBuild(build) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('ui', build || Date.now().toString());
+    window.location.replace(url.toString());
 }
 
 function startStatusPolling() {
@@ -2201,7 +2215,7 @@ function waitForServerToComeBack(expected, note) {
 
         clearInterval(timer);
         $('updateState').textContent = 'Back up, running ' + running + '. Reloading.';
-        setTimeout(() => window.location.reload(), 800);
+        setTimeout(() => reloadForBuild(config.build), 800);
     }, 1500);
 }
 
